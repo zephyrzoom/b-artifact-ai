@@ -1,0 +1,57 @@
+== 环境 ==
+{
+  "date": "2026-09-14T09:11:16Z",
+  "os": "Darwin 22.6.0 x86_64",
+  "cpu": "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz",
+  "n_cpu": 8,
+  "mem_bytes": 17179869184,
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "python": "Python 3.13.12",
+  "repo_root": "/Users/zzq7191/WorkBuddy/svn-copy-ai",
+  "scales": "m"
+}
+
+== 编译 bench profile ==
+    Finished `bench` profile [optimized] target(s) in 0.23s
+
+============================= 档位 m =============================
+
+
+-- 复用已有 fixture（--reuse）
+-- 复制运行副本 → /tmp/b-artifact-fixtures/m-run
+-- 压测开始 09:11:20Z：cargo bench --bench m15_bench -- --data-dir /tmp/b-artifact-fixtures/m-run --out /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-pool2/m15-m.json --label m --heavy auto --iterations 25 --budget 12 --only conc --concurrency 8,32
+    Finished `bench` profile [optimized] target(s) in 0.27s
+     Running benches/m15_bench.rs (target/release/deps/m15_bench-808996b77cf64389)
+[fixture] repo=bench head_rev=20000 文件 240000 / changes 438800 / 修订 20000 / blob 3000
+[conc] 并发…
+[out] JSON 报告已写入 /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-pool2/m15-m.json
+
+## m
+
+fixture：240000 个存活文件 / 20000 修订 / changes 438800 行 / blob 3000 个
+
+### 并发
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `tree_root_depth1_c8` | 64 | 1.3ms | 3.0ms | 4.0ms | - | 2775/s | 并发 8，64 请求，吞吐 2775 req/s |
+| `tree_root_depth1_c32` | 64 | 4.1ms | 6.5ms | 7.3ms | - | 4400/s | 并发 32，64 请求，吞吐 4400 req/s |
+| `download_blob_c8` | 64 | 1.1ms | 1.9ms | 2.8ms | - | 3667/s | 并发 8，64 请求，吞吐 3667 req/s |
+| `download_blob_c32` | 64 | 3.3ms | 4.6ms | 5.1ms | - | 5957/s | 并发 32，64 请求，吞吐 5957 req/s |
+| `tree_hist_leaf_c8` | 64 | 2.5ms | 3.7ms | 3.8ms | - | 2189/s | 并发 8，64 请求，吞吐 2189 req/s |
+| `tree_hist_leaf_c32` | 64 | 7.1ms | 10.6ms | 11.1ms | - | 2841/s | 并发 32，64 请求，吞吐 2841 req/s |
+| `tree_head_file_c8` | 64 | 859us | 1.7ms | 1.7ms | - | 4975/s | 并发 8，64 请求，吞吐 4975 req/s |
+| `tree_head_file_c32` | 64 | 3.1ms | 4.0ms | 4.2ms | - | 7075/s | 并发 32，64 请求，吞吐 7075 req/s |
+| `tree_hist_file_c8` | 64 | 901us | 1.6ms | 1.7ms | - | 5082/s | 并发 8，64 请求，吞吐 5082 req/s |
+| `tree_hist_file_c32` | 64 | 3.4ms | 4.7ms | 4.9ms | - | 6429/s | 并发 32，64 请求，吞吐 6429 req/s |
+| `repo_info_c8` | 64 | 205.1ms | 294.3ms | 411.5ms | - | 27/s | 并发 8，64 请求，吞吐 27 req/s |
+| `repo_info_c32` | 64 | 703.5ms | 1.11s | 1.14s | - | 28/s | 并发 32，64 请求，吞吐 28 req/s |
+| `log_50_c8` | 64 | 4.3ms | 10.1ms | 11.1ms | - | 1189/s | 并发 8，64 请求，吞吐 1189 req/s |
+| `log_50_c32` | 64 | 15.3ms | 20.4ms | 20.8ms | - | 1493/s | 并发 32，64 请求，吞吐 1493 req/s |
+
+-- 压测结束，耗时 10s
+
+== 全部完成 ==
+原始数据: /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-pool2
+生成汇总: python3 /Users/zzq7191/WorkBuddy/svn-copy-ai/scripts/m15_summary.py /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-pool2

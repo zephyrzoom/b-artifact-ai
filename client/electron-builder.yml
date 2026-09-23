@@ -1,0 +1,47 @@
+# 打包配置（§14 的 M4 交付物：Electron 可运行包）
+#
+# 关键约束：主进程 / preload 都由 esbuild 以 `packages: 'external'` 打包，
+# 也就是**不打进 node_modules**——好在它们只依赖 `electron` 与 Node 内置模块，
+# 所以打包时只需带上 dist/ 即可，不用把依赖树塞进 asar。
+appId: com.bartifact.client
+productName: b-artifact
+copyright: b-artifact
+
+directories:
+  output: release
+  buildResources: build
+
+# 只带构建产物与 package.json（main 字段指向 dist/main/index.js）
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+  # 运行时不从 node_modules 取任何东西（渲染层已由 Vite 预打包进 dist/renderer，
+  # 主进程只依赖 electron 与 Node 内置模块）。显式排除，避免把 Vue/Element Plus
+  # 这些构建期依赖原样塞进 asar；将来真加了运行时依赖，打包冒烟会立刻暴露
+  - '!node_modules/**'
+  # 运行时不从 node_modules 取任何东西（渲染层已由 Vite 预打包进 dist/renderer，
+  # 主进程只依赖 electron 与 Node 内置模块）。显式排除，避免把 Vue/Element Plus
+  # 这些构建期依赖原样塞进 asar；将来真加了运行时依赖，打包冒烟会立刻暴露
+  - '!node_modules/**'
+
+asar: true
+
+# 用本地已解包的 Electron 分发，**不要联网下载**（沙箱里下载 100MB 要几分钟，
+# 而且每次跑都可能重新下；`node_modules/electron/dist` 就是同一个发行包的解压结果）
+electronDist: node_modules/electron/dist
+
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  # 默认出 zip：它是 macOS 上合法的分发形态（解压后拖进「应用程序」即可），
+  # 也是 electron-builder 的 autoUpdater 消费的格式。
+  #
+  # **dmg 在本沙箱里做不出来**：dmg 目标需要 electron-builder 额外下载
+  # dmgbuild 工具包（`electron-userland/electron-builder-binaries` 那个 host 完全不可达，
+  # curl 直接返回 000，builder 报 502）。要出 dmg 就在有网的环境里加：
+  #   mac.target: [dmg, zip]
+  # 这一步与业务代码无关，纯粹是打包工具的下载依赖。
+  target:
+    - target: zip
+      arch: [x64]

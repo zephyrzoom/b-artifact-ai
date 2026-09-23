@@ -1,0 +1,91 @@
+== 环境 ==
+{
+  "date": "2026-09-15T07:23:10Z",
+  "os": "Darwin 22.6.0 x86_64",
+  "cpu": "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz",
+  "n_cpu": 8,
+  "mem_bytes": 17179869184,
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "python": "Python 3.13.12",
+  "repo_root": "/Users/zzq7191/WorkBuddy/svn-copy-ai",
+  "scales": "m"
+}
+
+== 编译 bench profile ==
+   Compiling b-artifact-server v0.1.0 (/Users/zzq7191/WorkBuddy/svn-copy-ai/server)
+    Finished `bench` profile [optimized] target(s) in 1m 37s
+
+============================= 档位 m =============================
+
+
+-- 复用已有 fixture（--reuse）
+-- 复制运行副本 → /tmp/b-artifact-fixtures/m-run
+-- 压测开始 07:24:51Z：cargo bench --bench m15_bench -- --data-dir /tmp/b-artifact-fixtures/m-run --out /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-m18/m15-m.json --label m --heavy on --iterations 20 --only storage,http
+    Finished `bench` profile [optimized] target(s) in 0.28s
+     Running benches/m15_bench.rs (target/release/deps/m15_bench-808996b77cf64389)
+[fixture] repo=bench head_rev=20000 文件 240000 / changes 438800 / 修订 20000 / blob 3000
+[storage] Path-History 核心路径…
+[http] 端到端（真实 axum + reqwest）…
+[out] JSON 报告已写入 /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-m18/m15-m.json
+
+## m
+
+fixture：240000 个存活文件 / 20000 修订 / changes 438800 行 / blob 3000 个
+
+### 存储层（直连）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `list_dir_head_root` | 20 | 5us | 5us | 5us | 1 | - |  |
+| `list_dir_head_l1` | 20 | 34us | 103us | 116us | 40 | - |  |
+| `list_dir_head_l2` | 20 | 35us | 82us | 91us | 40 | - |  |
+| `list_dir_head_leaf` | 20 | 12us | 38us | 46us | 10 | - |  |
+| `list_dir_at_leaf_head` | 20 | 18us | 18us | 18us | 10 | - |  |
+| `list_dir_at_leaf_mid` | 20 | 179us | 293us | 356us | 10 | - |  |
+| `list_dir_at_l2_mid` | 20 | 6.1ms | 6.6ms | 6.7ms | 40 | - |  |
+| `list_dir_at_root_head` | 1 | 49us | 49us | 49us | 1 | - |  |
+| `list_dir_at_l1_mid` | 1 | 107us | 107us | 107us | 40 | - |  |
+| `list_dir_at_leaf_head_cslike` | 20 | 23us | 57us | 92us | 10 | - |  |
+| `list_dir_at_l2_mid_cslike` | 20 | 6.1ms | 6.6ms | 7.1ms | 40 | - |  |
+| `list_dir_head_leaf_cslike` | 20 | 12us | 91us | 106us | 10 | - |  |
+| `list_dir_head_l2_cslike` | 20 | 33us | 33us | 34us | 40 | - |  |
+| `file_at_head` | 100 | 20us | 20us | 20us | 1 | - |  |
+| `file_at_old_rev` | 100 | 20us | 20us | 20us | 1 | - |  |
+| `dir_exists_at_head` | 20 | 9us | 10us | 10us | 0 | - |  |
+| `manifest_hash` | 5 | 241.9ms | 243.2ms | 243.2ms | 64 | - |  |
+| `repo_info_stats` | 20 | 38.1ms | 39.9ms | 41.9ms | 240000 | - |  |
+| `log_page_100` | 20 | 44us | 45us | 45us | 100 | - |  |
+| `changes_window_100rev` | 20 | 380us | 634us | 706us | 1010 | - |  |
+| `apply_commit_10` | 40 | 377us | 618us | 858us | 10 | - |  |
+| `apply_commit_100` | 15 | 2.7ms | 3.1ms | 3.4ms | 100 | - |  |
+| `apply_commit_1000` | 5 | 25.8ms | 25.9ms | 25.9ms | 1000 | - |  |
+| `refcount_correlated_1blob` | 5 | 46us | 5.9ms | 5.9ms | 1 | - |  |
+| `refcount_correlated_10blob` | 3 | 144us | 1.6ms | 1.6ms | 10 | - |  |
+| `refcount_groupby_all` | 3 | 49.5ms | 63.3ms | 63.3ms | 3000 | - |  |
+
+### HTTP 端到端
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `health` | 60 | 95us | 203us | 209us | - | - |  |
+| `tree_root_depth1` | 20 | 223us | 364us | 389us | 1 | - |  |
+| `tree_l1_depth1` | 20 | 384us | 647us | 653us | 40 | - |  |
+| `tree_l2_depth1` | 20 | 398us | 486us | 504us | 40 | - |  |
+| `tree_leaf_depth1` | 20 | 298us | 428us | 522us | 10 | - |  |
+| `tree_root_depth2` | 20 | 425us | 508us | 544us | 41 | - |  |
+| `tree_leaf_hist_rev` | 20 | 500us | 604us | 623us | 10 | - |  |
+| `tree_root_hist_rev` | 1 | 15.8ms | 15.8ms | 15.8ms | 1 | - |  |
+| `repo_info` | 20 | 39.5ms | 40.1ms | 40.2ms | - | - |  |
+| `log_50` | 20 | 1.2ms | 1.6ms | 1.6ms | 20000 | - |  |
+| `changes_100rev` | 20 | 4.5ms | 4.9ms | 5.0ms | 1010 | - |  |
+| `missing_1000` | 20 | 7.1ms | 7.5ms | 7.6ms | - | - |  |
+| `download_blob` | 40 | 316us | 636us | 902us | 7 | - |  |
+| `login_argon2id` | 5 | 116.2ms | 116.8ms | 116.8ms | - | - |  |
+| `commit_two_phase_10` | 10 | 6.5ms | 366.8ms | 366.8ms | 10 | - | prepare + commit 合计，含 10 条变更 |
+
+-- 压测结束，耗时 15s
+
+== 全部完成 ==
+原始数据: /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-m18
+生成汇总: python3 /Users/zzq7191/WorkBuddy/svn-copy-ai/scripts/m15_summary.py /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results-m18

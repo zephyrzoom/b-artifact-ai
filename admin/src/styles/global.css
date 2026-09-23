@@ -1,0 +1,101 @@
+:root {
+  --ba-bg: #f4f6fa;
+  --ba-panel: #ffffff;
+  --ba-border: #e4e7ed;
+  --ba-text: #1f2329;
+  --ba-muted: #8a919f;
+}
+
+html.dark {
+  --ba-bg: #14161a;
+  --ba-panel: #1b1e24;
+  --ba-border: #2c313a;
+  --ba-text: #e5eaf3;
+  --ba-muted: #8a919f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--ba-bg);
+  color: var(--ba-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  font-size: 14px;
+}
+
+.page {
+  padding: 18px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.page-sub {
+  color: var(--ba-muted);
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+.card {
+  background: var(--ba-panel);
+  border: 1px solid var(--ba-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.mono {
+  font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 12.5px;
+}
+
+.muted {
+  color: var(--ba-muted);
+}
+
+.flex {
+  display: flex;
+  align-items: center;
+}
+
+.gap8 {
+  gap: 8px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* Element Plus 在深色模式下的容器底色跟随变量 */
+html.dark .el-card,
+html.dark .el-table,
+html.dark .el-input__wrapper,
+html.dark .el-textarea__inner {
+  background-color: var(--ba-panel);
+}
+
+html.dark .el-table tr {
+  background-color: var(--ba-panel);
+}
+
+html.dark .el-table th.el-table__cell {
+  background-color: #20242b !important;
+}
+
+html.dark .el-drawer,
+html.dark .el-dialog {
+  background: var(--ba-panel);
+}

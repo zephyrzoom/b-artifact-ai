@@ -1,0 +1,42 @@
+{
+  "name": "b-artifact-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "b-artifact 客户端（工作副本 / 稀疏检出 / 锁 / 冲突解决）",
+  "scripts": {
+    "typecheck": "tsc --noEmit && vue-tsc -p tsconfig.renderer.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cli": "tsx src/cli.ts",
+    "build:main": "node scripts/build.mjs main",
+    "build:renderer": "node scripts/build.mjs renderer",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/start.mjs",
+    "dev:renderer": "vite",
+    "icon": "node scripts/make-icon.mjs",
+    "dist": "npm run build && npm run icon && electron-builder",
+    "dist:dir": "npm run build && npm run icon && electron-builder --dir"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "@vue/test-utils": "^2.5.0",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.24.2",
+    "happy-dom": "^15.11.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.2.12",
+    "@element-plus/icons-vue": "^2.3.2",
+    "element-plus": "^2.14.5",
+    "pinia": "^2.3.1",
+    "vue": "^3.5.42"
+  },
+  "dependencies": {},
+  "main": "dist/main/index.js",
+  "author": "b-artifact"
+}

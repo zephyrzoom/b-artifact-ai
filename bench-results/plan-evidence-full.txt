@@ -1,0 +1,109 @@
+# Path-History 查询计划证据
+
+- fixture：`/tmp/b-artifact-fixtures/full/b-artifact.db`
+- 规模：`changes` **1,995,000** 行 / `head_entries` **1,000,000** 行 / `revisions` **100,000** 行 / `head_rev` = 100000
+- `PRAGMA case_sensitive_like` = **OFF**（与 `db::open()` 现状一致）
+- 样本前缀：末级目录 `assets/0000/0000/000/`
+
+## 1. 生产写法（现状）
+
+| 查询 | 数据规模 | 判定 |
+|---|---|---|
+| changes 前缀（last_changes_under，窗口函数） | `changes` 1,995,000 行 | ⚠️ **用了索引但关键列 path 无界**（= 整仓扫描） |
+| head_entries 前缀（list_dir_head） | `head_entries` 1,000,000 行 | ⚠️ **用了索引但关键列 path 无界**（= 整仓扫描） |
+| byte_delta 反查（apply_commit_tx） | `changes` 1,995,000 行 | ⚠️ **用了索引但关键列 blob_hash 无界**（= 整仓扫描） |
+| 路径自身最近变更（last_change） | `changes` 1,995,000 行 | ✅ 索引范围扫描，关键列 path 有界，无临时排序 |
+| revision 列表（log 分页） | `revisions` 100,000 行 | ✅ 索引范围扫描，关键列 rev 有界，无临时排序 |
+
+**changes 前缀（last_changes_under，窗口函数） —— 生产写法**
+
+```
+  CO-ROUTINE last
+  CO-ROUTINE (subquery-3)
+  SEARCH changes USING INDEX idx_changes_rev (repo_id=? AND rev<?)
+  USE TEMP B-TREE FOR ORDER BY
+  SCAN (subquery-3)
+  SCAN last
+```
+
+**head_entries 前缀（list_dir_head） —— 生产写法**
+
+```
+  SEARCH head_entries USING INDEX sqlite_autoindex_head_entries_1 (repo_id=?)
+```
+
+**byte_delta 反查（apply_commit_tx） —— 生产写法**
+
+```
+  SEARCH changes USING INDEX idx_changes_rev (repo_id=?)
+```
+
+**路径自身最近变更（last_change） —— 生产写法**
+
+```
+  SEARCH changes USING INDEX idx_changes_path (repo_id=? AND path=? AND rev<?)
+```
+
+**revision 列表（log 分页） —— 生产写法**
+
+```
+  SEARCH revisions USING INDEX sqlite_autoindex_revisions_1 (repo_id=? AND rev<?)
+```
+
+> `SEARCH changes USING INDEX idx_changes_rev (repo_id=?)` 读作：**只按 `repo_id` 界了范围**，等于顺着索引把该仓库的**全部**历史行读一遍；`USE TEMP B-TREE FOR ORDER BY` 说明窗口函数还要额外排一次序。
+
+
+## 2. 等价重写：前缀 `LIKE` → `GLOB`
+
+| 查询 | 生产（LIKE） | 重写（GLOB） |
+|---|---|---|
+| changes 前缀（last_changes_under，窗口函数） | **用了索引但关键列 path 无界**（= 整仓扫描） | 索引范围扫描，关键列 path 有界，无临时排序 |
+
+**changes 前缀（last_changes_under，窗口函数） —— GLOB 重写**
+
+```
+  CO-ROUTINE last
+  CO-ROUTINE (subquery-3)
+  SEARCH changes USING INDEX idx_changes_path (repo_id=? AND path>? AND path<?)
+  SCAN (subquery-3)
+  SCAN last
+```
+| head_entries 前缀（list_dir_head） | **用了索引但关键列 path 无界**（= 整仓扫描） | 索引范围扫描，关键列 path 有界，无临时排序 |
+
+**head_entries 前缀（list_dir_head） —— GLOB 重写**
+
+```
+  SEARCH head_entries USING INDEX sqlite_autoindex_head_entries_1 (repo_id=? AND path>? AND path<?)
+```
+
+> GLOB 版本走 `idx_changes_path (repo_id=? AND path>? AND path<?)`，**前缀被下推成索引范围扫描**；又因为索引序本身就是 `path` 序，`USE TEMP B-TREE FOR ORDER BY` 一并消失。
+
+
+## 3. B4 提案：`head_entries` 增加 `parent_path`
+
+现状下 `list_dir_head` 的语义是「返回整棵子树的全部条目」，再由 API 层在 Rust 里按 `depth` 过滤 —— 于是**列一个目录的代价 = 该子树的行数**，列仓库根目录就要把 100 万行读出来才能返回 100 个子项。
+
+```sql
+ALTER TABLE head_entries ADD COLUMN parent_path TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_head_parent ON head_entries(repo_id, parent_path);
+```
+
+实测：临时表 `head_demo`（200,000 行）+ `idx_head_demo_parent` → ✅ 索引范围扫描，关键列 parent_path 有界，无临时排序
+
+
+**按 `parent_path` 点查（列 `assets/0000/0000`）**
+
+```
+  SEARCH head_demo USING INDEX idx_head_demo_parent (repo_id=? AND parent_path=?)
+```
+
+> 代价变成 `O(直接子项数)`，与子树规模、与全仓规模都无关。`changes` 侧同理（`last_changes_under` 也可按 `parent_path` 收窄）。
+
+
+## 4. 判定汇总
+
+**3 / 5** 条关键查询没有把关键列下推到索引：
+
+- `changes 前缀（last_changes_under，窗口函数）` —— **用了索引但关键列 path 无界**（= 整仓扫描）
+- `head_entries 前缀（list_dir_head）` —— **用了索引但关键列 path 无界**（= 整仓扫描）
+- `byte_delta 反查（apply_commit_tx）` —— **用了索引但关键列 blob_hash 无界**（= 整仓扫描）

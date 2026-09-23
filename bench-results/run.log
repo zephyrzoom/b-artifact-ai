@@ -1,0 +1,387 @@
+== 环境 ==
+{
+  "date": "2026-09-14T08:49:54Z",
+  "os": "Darwin 22.6.0 x86_64",
+  "cpu": "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz",
+  "n_cpu": 8,
+  "mem_bytes": 17179869184,
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "python": "Python 3.13.12",
+  "repo_root": "/Users/zzq7191/WorkBuddy/svn-copy-ai",
+  "scales": "xs,s,m"
+}
+
+== 编译 bench profile ==
+   Compiling b-artifact-server v0.1.0 (/Users/zzq7191/WorkBuddy/svn-copy-ai/server)
+    Finished `bench` profile [optimized] target(s) in 1m 19s
+
+============================= 档位 xs =============================
+
+
+-- fixture 已存在，直接复用（--force 可重造）
+-- 复制运行副本 → /tmp/b-artifact-fixtures/xs-run
+-- 压测开始 08:51:17Z：cargo bench --bench m15_bench -- --data-dir /tmp/b-artifact-fixtures/xs-run --out /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results/m15-xs.json --label xs --heavy auto --iterations 25 --budget 12 --concurrency 8,32
+    Finished `bench` profile [optimized] target(s) in 0.45s
+     Running benches/m15_bench.rs (target/release/deps/m15_bench-808996b77cf64389)
+[fixture] repo=bench head_rev=200 文件 1000 / changes 2990 / 修订 200 / blob 800
+[env] 采集环境底噪…
+[storage] Path-History 核心路径…
+[sweep] 查询计划对照（LIKE vs GLOB）+ 候选代价…
+[http] 端到端（真实 axum + reqwest）…
+[conc] 并发…
+[out] JSON 报告已写入 /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results/m15-xs.json
+
+## xs
+
+fixture：1000 个存活文件 / 200 修订 / changes 2990 行 / blob 800 个
+
+### 环境底噪
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `file_open_read_close` | 20 | 12us | 26us | 208us | 785 | - | 打开+读一个已有 blob 文件的固定开销 |
+| `sqlite_point_query` | 25 | 1us | 1us | 1us | 1 | - |  |
+| `stmt_prepare_uncached` | 2000 | 8us | 8us | 28us | 7 | - | 每次调用重新 prepare（现状：query_row 传 SQL 字面量） |
+| `stmt_prepare_cached` | 2000 | 0us | 0us | 1us | 7 | - | 走语句缓存（修复方向：prepare_cached） |
+| `stmt_index_lookup` | 2000 | 4us | 4us | 17us | 1 | - | 已 prepare 的点查（含索引查找 + 无匹配） |
+
+### 存储层（直连）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `list_dir_head_root` | 25 | 4us | 18us | 20us | 1 | - |  |
+| `list_dir_head_l1` | 25 | 7us | 8us | 8us | 5 | - |  |
+| `list_dir_head_l2` | 25 | 7us | 7us | 7us | 5 | - |  |
+| `list_dir_head_leaf` | 25 | 10us | 10us | 12us | 8 | - |  |
+| `list_dir_at_leaf_head` | 20 | 208us | 300us | 365us | 8 | - |  |
+| `list_dir_at_leaf_mid` | 20 | 193us | 358us | 387us | 8 | - |  |
+| `list_dir_at_l2_mid` | 20 | 4.9ms | 5.3ms | 5.4ms | 5 | - |  |
+| `list_dir_at_root_head` | 3 | 25.6ms | 34.7ms | 34.7ms | 1 | - |  |
+| `list_dir_at_l1_mid` | 3 | 25.8ms | 26.0ms | 26.0ms | 5 | - |  |
+| `list_dir_at_leaf_head_cslike` | 20 | 205us | 207us | 264us | 8 | - |  |
+| `list_dir_at_l2_mid_cslike` | 20 | 4.8ms | 5.3ms | 5.5ms | 5 | - |  |
+| `list_dir_head_leaf_cslike` | 25 | 10us | 11us | 34us | 8 | - |  |
+| `list_dir_head_l2_cslike` | 25 | 7us | 8us | 8us | 5 | - |  |
+| `file_at_head` | 125 | 19us | 32us | 65us | 1 | - |  |
+| `file_at_old_rev` | 125 | 19us | 20us | 20us | 1 | - |  |
+| `dir_exists_at_head` | 25 | 12us | 13us | 13us | 0 | - |  |
+| `manifest_hash` | 5 | 941us | 971us | 971us | 64 | - |  |
+| `repo_info_stats` | 25 | 142us | 294us | 427us | 1000 | - |  |
+| `log_page_100` | 25 | 43us | 43us | 44us | 100 | - |  |
+| `changes_window_100rev` | 20 | 302us | 457us | 567us | 1010 | - |  |
+| `apply_commit_10` | 40 | 258us | 445us | 614us | 10 | - |  |
+| `apply_commit_100` | 15 | 1.9ms | 2.1ms | 2.6ms | 100 | - |  |
+| `apply_commit_1000` | 5 | 17.4ms | 18.2ms | 18.2ms | 1000 | - |  |
+| `refcount_correlated_1blob` | 5 | 212us | 6.1ms | 6.1ms | 1 | - |  |
+| `refcount_correlated_10blob` | 3 | 2.2ms | 3.3ms | 3.3ms | 10 | - |  |
+| `refcount_groupby_all` | 3 | 3.1ms | 5.6ms | 5.6ms | 783 | - |  |
+
+### 前缀查询计划对照（LIKE vs GLOB）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `changes_prefix_like_root` | 5 | 4.2ms | 4.6ms | 4.6ms | 1000 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_root` | 5 | 3.4ms | 4.0ms | 4.0ms | 1000 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 1000 行 |
+| `head_prefix_like_root` | 5 | 247us | 333us | 333us | 1155 | - |  |
+| `head_prefix_glob_root` | 5 | 194us | 196us | 196us | 1155 | - |  |
+| `changes_prefix_like_l2` | 5 | 1.1ms | 1.4ms | 1.4ms | 200 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_l2` | 5 | 846us | 1.2ms | 1.2ms | 200 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 200 行 |
+| `head_prefix_like_l2` | 5 | 132us | 168us | 168us | 230 | - |  |
+| `head_prefix_glob_l2` | 5 | 50us | 51us | 51us | 230 | - |  |
+| `changes_prefix_like_leaf` | 5 | 472us | 684us | 684us | 8 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_leaf` | 5 | 118us | 125us | 125us | 8 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 8 行 |
+| `head_prefix_like_leaf` | 5 | 105us | 108us | 108us | 8 | - |  |
+| `head_prefix_glob_leaf` | 5 | 15us | 16us | 16us | 8 | - |  |
+| `file_at_x1` | 5 | 20us | 21us | 21us | 1 | - | 1 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+| `file_at_x10` | 5 | 243us | 277us | 277us | 10 | - | 10 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+| `file_at_x100` | 5 | 2.1ms | 2.6ms | 2.6ms | 100 | - | 100 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+
+### HTTP 端到端
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `health` | 75 | 106us | 221us | 257us | - | - |  |
+| `tree_root_depth1` | 25 | 211us | 276us | 290us | 1 | - |  |
+| `tree_l1_depth1` | 25 | 241us | 425us | 555us | 5 | - |  |
+| `tree_l2_depth1` | 25 | 234us | 333us | 350us | 5 | - |  |
+| `tree_leaf_depth1` | 25 | 262us | 408us | 474us | 8 | - |  |
+| `tree_root_depth2` | 20 | 231us | 329us | 366us | 6 | - |  |
+| `tree_leaf_hist_rev` | 20 | 487us | 750us | 753us | 8 | - |  |
+| `tree_root_hist_rev` | 3 | 24.9ms | 25.7ms | 25.7ms | 1 | - |  |
+| `repo_info` | 25 | 406us | 719us | 785us | - | - |  |
+| `log_50` | 25 | 518us | 749us | 771us | 200 | - |  |
+| `changes_100rev` | 20 | 4.2ms | 4.7ms | 4.8ms | 1010 | - |  |
+| `missing_1000` | 20 | 7.0ms | 7.5ms | 11.1ms | - | - |  |
+| `download_blob` | 50 | 286us | 507us | 517us | 3 | - |  |
+| `login_argon2id` | 5 | 115.5ms | 135.6ms | 135.6ms | - | - |  |
+| `commit_two_phase_10` | 10 | 2.7ms | 8.1ms | 8.1ms | 10 | - | prepare + commit 合计，含 10 条变更 |
+
+### 并发
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `tree_root_depth1_c8` | 64 | 2.3ms | 37.3ms | 38.1ms | - | 291/s | 并发 8，64 请求，吞吐 291 req/s |
+| `tree_root_depth1_c32` | 64 | 3.9ms | 9.7ms | 12.9ms | - | 1807/s | 并发 32，64 请求，吞吐 1807 req/s |
+| `download_blob_c8` | 64 | 2.6ms | 41.6ms | 66.2ms | - | 198/s | 并发 8，64 请求，吞吐 198 req/s |
+| `download_blob_c32` | 64 | 10.1ms | 12.7ms | 40.6ms | - | 836/s | 并发 32，64 请求，吞吐 836 req/s |
+| `tree_hist_leaf_c8` | 64 | 2.7ms | 40.5ms | 65.0ms | - | 267/s | 并发 8，64 请求，吞吐 267 req/s |
+| `tree_hist_leaf_c32` | 64 | 7.2ms | 9.9ms | 12.4ms | - | 1987/s | 并发 32，64 请求，吞吐 1987 req/s |
+| `tree_head_file_c8` | 64 | 2.1ms | 38.1ms | 58.9ms | - | 280/s | 并发 8，64 请求，吞吐 280 req/s |
+| `tree_head_file_c32` | 64 | 3.4ms | 9.3ms | 21.3ms | - | 1281/s | 并发 32，64 请求，吞吐 1281 req/s |
+| `tree_hist_file_c8` | 64 | 4.3ms | 39.4ms | 39.9ms | - | 219/s | 并发 8，64 请求，吞吐 219 req/s |
+| `tree_hist_file_c32` | 64 | 3.6ms | 10.7ms | 21.9ms | - | 1936/s | 并发 32，64 请求，吞吐 1936 req/s |
+| `repo_info_c8` | 64 | 2.6ms | 21.1ms | 21.7ms | - | 584/s | 并发 8，64 请求，吞吐 584 req/s |
+| `repo_info_c32` | 64 | 5.5ms | 8.4ms | 9.4ms | - | 3189/s | 并发 32，64 请求，吞吐 3189 req/s |
+| `log_50_c8` | 64 | 2.2ms | 38.6ms | 39.9ms | - | 327/s | 并发 8，64 请求，吞吐 327 req/s |
+| `log_50_c32` | 64 | 6.0ms | 22.3ms | 39.1ms | - | 658/s | 并发 32，64 请求，吞吐 658 req/s |
+
+-- 压测结束，耗时 5s
+
+============================= 档位 s =============================
+
+
+-- fixture 已存在，直接复用（--force 可重造）
+-- 复制运行副本 → /tmp/b-artifact-fixtures/s-run
+-- 压测开始 08:51:25Z：cargo bench --bench m15_bench -- --data-dir /tmp/b-artifact-fixtures/s-run --out /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results/m15-s.json --label s --heavy auto --iterations 25 --budget 12 --concurrency 8,32
+    Finished `bench` profile [optimized] target(s) in 0.22s
+     Running benches/m15_bench.rs (target/release/deps/m15_bench-808996b77cf64389)
+[fixture] repo=bench head_rev=1000 文件 40000 / changes 49800 / 修订 1000 / blob 2000
+[env] 采集环境底噪…
+[storage] Path-History 核心路径…
+[sweep] 查询计划对照（LIKE vs GLOB）+ 候选代价…
+[http] 端到端（真实 axum + reqwest）…
+[conc] 并发…
+[out] JSON 报告已写入 /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results/m15-s.json
+
+## s
+
+fixture：40000 个存活文件 / 1000 修订 / changes 49800 行 / blob 2000 个
+
+### 环境底噪
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `file_open_read_close` | 20 | 12us | 25us | 312us | 1175 | - | 打开+读一个已有 blob 文件的固定开销 |
+| `sqlite_point_query` | 25 | 1us | 1us | 1us | 1 | - |  |
+| `stmt_prepare_uncached` | 2000 | 8us | 9us | 32us | 7 | - | 每次调用重新 prepare（现状：query_row 传 SQL 字面量） |
+| `stmt_prepare_cached` | 2000 | 0us | 0us | 0us | 7 | - | 走语句缓存（修复方向：prepare_cached） |
+| `stmt_index_lookup` | 2000 | 4us | 4us | 4us | 1 | - | 已 prepare 的点查（含索引查找 + 无匹配） |
+
+### 存储层（直连）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `list_dir_head_root` | 25 | 4us | 5us | 5us | 1 | - |  |
+| `list_dir_head_l1` | 25 | 19us | 34us | 44us | 20 | - |  |
+| `list_dir_head_l2` | 25 | 21us | 76us | 241us | 20 | - |  |
+| `list_dir_head_leaf` | 25 | 14us | 41us | 43us | 10 | - |  |
+| `list_dir_at_leaf_head` | 20 | 219us | 248us | 254us | 10 | - |  |
+| `list_dir_at_leaf_mid` | 20 | 218us | 268us | 406us | 10 | - |  |
+| `list_dir_at_l2_mid` | 20 | 46.6ms | 47.2ms | 47.4ms | 20 | - |  |
+| `list_dir_at_root_head` | 3 | 978.2ms | 1.01s | 1.01s | 1 | - |  |
+| `list_dir_at_l1_mid` | 3 | 957.7ms | 962.5ms | 962.5ms | 20 | - |  |
+| `list_dir_at_leaf_head_cslike` | 20 | 239us | 495us | 500us | 10 | - |  |
+| `list_dir_at_l2_mid_cslike` | 20 | 46.6ms | 47.3ms | 47.4ms | 20 | - |  |
+| `list_dir_head_leaf_cslike` | 25 | 11us | 12us | 12us | 10 | - |  |
+| `list_dir_head_l2_cslike` | 25 | 18us | 19us | 19us | 20 | - |  |
+| `file_at_head` | 125 | 20us | 21us | 83us | 1 | - |  |
+| `file_at_old_rev` | 125 | 20us | 48us | 112us | 1 | - |  |
+| `dir_exists_at_head` | 25 | 12us | 51us | 51us | 0 | - |  |
+| `manifest_hash` | 5 | 39.4ms | 39.7ms | 39.7ms | 64 | - |  |
+| `repo_info_stats` | 25 | 8.6ms | 9.1ms | 9.2ms | 40000 | - |  |
+| `log_page_100` | 25 | 42us | 43us | 44us | 100 | - |  |
+| `changes_window_100rev` | 20 | 356us | 460us | 566us | 1010 | - |  |
+| `apply_commit_10` | 40 | 281us | 392us | 688us | 10 | - |  |
+| `apply_commit_100` | 15 | 1.9ms | 2.5ms | 2.7ms | 100 | - |  |
+| `apply_commit_1000` | 5 | 19.7ms | 20.0ms | 20.0ms | 1000 | - |  |
+| `refcount_correlated_1blob` | 5 | 4.6ms | 5.9ms | 5.9ms | 1 | - |  |
+| `refcount_correlated_10blob` | 3 | 43.4ms | 43.7ms | 43.7ms | 10 | - |  |
+| `refcount_groupby_all` | 3 | 33.2ms | 64.2ms | 64.2ms | 2000 | - |  |
+
+### 前缀查询计划对照（LIKE vs GLOB）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `changes_prefix_like_root` | 5 | 88.7ms | 89.8ms | 89.8ms | 40000 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_root` | 5 | 64.4ms | 67.3ms | 67.3ms | 40000 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 40000 行 |
+| `head_prefix_like_root` | 5 | 9.9ms | 10.0ms | 10.0ms | 44420 | - |  |
+| `head_prefix_glob_root` | 5 | 8.0ms | 8.3ms | 8.3ms | 44420 | - |  |
+| `changes_prefix_like_l2` | 5 | 11.5ms | 12.2ms | 12.2ms | 2000 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_l2` | 5 | 2.9ms | 3.6ms | 3.6ms | 2000 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 2000 行 |
+| `head_prefix_like_l2` | 5 | 4.6ms | 5.3ms | 5.3ms | 2220 | - |  |
+| `head_prefix_glob_l2` | 5 | 361us | 367us | 367us | 2220 | - |  |
+| `changes_prefix_like_leaf` | 5 | 7.8ms | 9.2ms | 9.2ms | 10 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_leaf` | 5 | 156us | 370us | 370us | 10 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 10 行 |
+| `head_prefix_like_leaf` | 5 | 3.8ms | 5.0ms | 5.0ms | 10 | - |  |
+| `head_prefix_glob_leaf` | 5 | 15us | 17us | 17us | 10 | - |  |
+| `file_at_x1` | 5 | 20us | 21us | 21us | 1 | - | 1 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+| `file_at_x10` | 5 | 194us | 196us | 196us | 10 | - | 10 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+| `file_at_x100` | 5 | 2.2ms | 2.6ms | 2.6ms | 100 | - | 100 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+
+### HTTP 端到端
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `health` | 75 | 98us | 182us | 241us | - | - |  |
+| `tree_root_depth1` | 25 | 212us | 290us | 355us | 1 | - |  |
+| `tree_l1_depth1` | 25 | 310us | 496us | 566us | 20 | - |  |
+| `tree_l2_depth1` | 25 | 292us | 353us | 370us | 20 | - |  |
+| `tree_leaf_depth1` | 25 | 280us | 479us | 523us | 10 | - |  |
+| `tree_root_depth2` | 20 | 295us | 364us | 367us | 21 | - |  |
+| `tree_leaf_hist_rev` | 20 | 520us | 776us | 814us | 10 | - |  |
+| `tree_root_hist_rev` | 3 | 987.8ms | 1.10s | 1.10s | 1 | - |  |
+| `repo_info` | 25 | 9.3ms | 10.0ms | 10.1ms | - | - |  |
+| `log_50` | 25 | 578us | 801us | 840us | 1000 | - |  |
+| `changes_100rev` | 20 | 4.3ms | 4.6ms | 4.7ms | 1010 | - |  |
+| `missing_1000` | 20 | 6.9ms | 7.6ms | 10.3ms | - | - |  |
+| `download_blob` | 50 | 291us | 527us | 609us | 5 | - |  |
+| `login_argon2id` | 5 | 119.2ms | 140.3ms | 140.3ms | - | - |  |
+| `commit_two_phase_10` | 10 | 7.2ms | 101.5ms | 101.5ms | 10 | - | prepare + commit 合计，含 10 条变更 |
+
+### 并发
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `tree_root_depth1_c8` | 64 | 1.9ms | 6.2ms | 6.6ms | - | 2489/s | 并发 8，64 请求，吞吐 2489 req/s |
+| `tree_root_depth1_c32` | 64 | 8.1ms | 12.2ms | 20.6ms | - | 1108/s | 并发 32，64 请求，吞吐 1108 req/s |
+| `download_blob_c8` | 64 | 4.7ms | 40.8ms | 42.1ms | - | 219/s | 并发 8，64 请求，吞吐 219 req/s |
+| `download_blob_c32` | 64 | 11.9ms | 25.7ms | 40.2ms | - | 779/s | 并发 32，64 请求，吞吐 779 req/s |
+| `tree_hist_leaf_c8` | 64 | 2.8ms | 39.4ms | 60.8ms | - | 267/s | 并发 8，64 请求，吞吐 267 req/s |
+| `tree_hist_leaf_c32` | 64 | 10.5ms | 13.9ms | 14.2ms | - | 1738/s | 并发 32，64 请求，吞吐 1738 req/s |
+| `tree_head_file_c8` | 64 | 2.3ms | 39.1ms | 40.4ms | - | 278/s | 并发 8，64 请求，吞吐 278 req/s |
+| `tree_head_file_c32` | 64 | 3.4ms | 5.8ms | 10.1ms | - | 2966/s | 并发 32，64 请求，吞吐 2966 req/s |
+| `tree_hist_file_c8` | 64 | 2.3ms | 41.6ms | 66.4ms | - | 193/s | 并发 8，64 请求，吞吐 193 req/s |
+| `tree_hist_file_c32` | 64 | 4.2ms | 9.1ms | 19.4ms | - | 1573/s | 并发 32，64 请求，吞吐 1573 req/s |
+| `repo_info_c8` | 64 | 37.8ms | 52.0ms | 53.2ms | - | 187/s | 并发 8，64 请求，吞吐 187 req/s |
+| `repo_info_c32` | 64 | 111.9ms | 167.7ms | 168.2ms | - | 194/s | 并发 32，64 请求，吞吐 194 req/s |
+| `log_50_c8` | 64 | 3.1ms | 39.8ms | 62.8ms | - | 260/s | 并发 8，64 请求，吞吐 260 req/s |
+| `log_50_c32` | 64 | 5.1ms | 7.4ms | 11.9ms | - | 1833/s | 并发 32，64 请求，吞吐 1833 req/s |
+
+-- 压测结束，耗时 19s
+
+============================= 档位 m =============================
+
+
+-- fixture 已存在，直接复用（--force 可重造）
+-- 复制运行副本 → /tmp/b-artifact-fixtures/m-run
+-- 压测开始 08:51:47Z：cargo bench --bench m15_bench -- --data-dir /tmp/b-artifact-fixtures/m-run --out /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results/m15-m.json --label m --heavy auto --iterations 25 --budget 12 --concurrency 8,32
+    Finished `bench` profile [optimized] target(s) in 0.22s
+     Running benches/m15_bench.rs (target/release/deps/m15_bench-808996b77cf64389)
+[fixture] repo=bench head_rev=20000 文件 240000 / changes 438800 / 修订 20000 / blob 3000
+[env] 采集环境底噪…
+[storage] Path-History 核心路径…
+[sweep] 查询计划对照（LIKE vs GLOB）+ 候选代价…
+[http] 端到端（真实 axum + reqwest）…
+[conc] 并发…
+[out] JSON 报告已写入 /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results/m15-m.json
+
+## m
+
+fixture：240000 个存活文件 / 20000 修订 / changes 438800 行 / blob 3000 个
+
+### 环境底噪
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `file_open_read_close` | 20 | 12us | 25us | 280us | 1566 | - | 打开+读一个已有 blob 文件的固定开销 |
+| `sqlite_point_query` | 25 | 1us | 1us | 1us | 1 | - |  |
+| `stmt_prepare_uncached` | 2000 | 8us | 8us | 24us | 7 | - | 每次调用重新 prepare（现状：query_row 传 SQL 字面量） |
+| `stmt_prepare_cached` | 2000 | 0us | 0us | 1us | 7 | - | 走语句缓存（修复方向：prepare_cached） |
+| `stmt_index_lookup` | 2000 | 4us | 4us | 20us | 1 | - | 已 prepare 的点查（含索引查找 + 无匹配） |
+
+### 存储层（直连）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `list_dir_head_root` | 25 | 5us | 5us | 5us | 1 | - |  |
+| `list_dir_head_l1` | 25 | 34us | 35us | 35us | 40 | - |  |
+| `list_dir_head_l2` | 25 | 33us | 33us | 33us | 40 | - |  |
+| `list_dir_head_leaf` | 25 | 11us | 11us | 11us | 10 | - |  |
+| `list_dir_at_leaf_head` | 20 | 244us | 344us | 495us | 10 | - |  |
+| `list_dir_at_leaf_mid` | 20 | 305us | 679us | 688us | 10 | - |  |
+| `list_dir_at_l2_mid` | 20 | 160.6ms | 164.7ms | 166.7ms | 40 | - |  |
+| `list_dir_at_root_head` | 1 | 7.38s | 7.38s | 7.38s | 1 | - |  |
+| `list_dir_at_l1_mid` | 1 | 6.96s | 6.96s | 6.96s | 40 | - |  |
+| `list_dir_at_leaf_head_cslike` | 20 | 246us | 670us | 716us | 10 | - |  |
+| `list_dir_at_l2_mid_cslike` | 20 | 159.4ms | 161.8ms | 246.4ms | 40 | - |  |
+| `list_dir_head_leaf_cslike` | 25 | 12us | 12us | 12us | 10 | - |  |
+| `list_dir_head_l2_cslike` | 25 | 61us | 126us | 131us | 40 | - |  |
+| `file_at_head` | 125 | 20us | 21us | 34us | 1 | - |  |
+| `file_at_old_rev` | 125 | 21us | 21us | 21us | 1 | - |  |
+| `dir_exists_at_head` | 25 | 13us | 13us | 13us | 0 | - |  |
+| `manifest_hash` | 5 | 235.4ms | 238.2ms | 238.2ms | 64 | - |  |
+| `repo_info_stats` | 25 | 50.8ms | 52.3ms | 53.3ms | 240000 | - |  |
+| `log_page_100` | 25 | 46us | 119us | 161us | 100 | - |  |
+| `changes_window_100rev` | 20 | 363us | 379us | 452us | 1010 | - |  |
+| `apply_commit_10` | 40 | 294us | 537us | 679us | 10 | - |  |
+| `apply_commit_100` | 15 | 2.0ms | 2.8ms | 3.2ms | 100 | - |  |
+| `apply_commit_1000` | 5 | 19.5ms | 20.2ms | 20.2ms | 1000 | - |  |
+| `refcount_correlated_1blob` | 5 | 37.5ms | 42.3ms | 42.3ms | 1 | - |  |
+| `refcount_correlated_10blob` | 3 | 364.1ms | 374.1ms | 374.1ms | 10 | - |  |
+| `refcount_groupby_all` | 3 | 316.4ms | 319.2ms | 319.2ms | 3000 | - |  |
+
+### 前缀查询计划对照（LIKE vs GLOB）
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `changes_prefix_like_root` | 5 | 874.6ms | 938.6ms | 938.6ms | 240000 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_root` | 5 | 922.6ms | 926.1ms | 926.1ms | 240000 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 240000 行 |
+| `head_prefix_like_root` | 5 | 59.3ms | 60.1ms | 60.1ms | 265640 | - |  |
+| `head_prefix_glob_root` | 5 | 49.3ms | 49.6ms | 49.6ms | 265640 | - |  |
+| `changes_prefix_like_l2` | 5 | 88.4ms | 96.1ms | 96.1ms | 6000 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_l2` | 5 | 23.0ms | 23.5ms | 23.5ms | 6000 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 6000 行 |
+| `head_prefix_like_l2` | 5 | 26.6ms | 27.3ms | 27.3ms | 6640 | - |  |
+| `head_prefix_glob_l2` | 5 | 1.0ms | 1.2ms | 1.2ms | 6640 | - |  |
+| `changes_prefix_like_leaf` | 5 | 74.1ms | 74.8ms | 74.8ms | 10 | - | 生产写法：前缀 LIKE + 窗口函数（计划退化为全历史扫描） |
+| `changes_prefix_glob_leaf` | 5 | 113us | 125us | 125us | 10 | - | 等价重写：GLOB 前缀（走 idx_changes_path 范围扫描）；与 LIKE 同结果 10 行 |
+| `head_prefix_like_leaf` | 5 | 25.4ms | 25.6ms | 25.6ms | 10 | - |  |
+| `head_prefix_glob_leaf` | 5 | 17us | 29us | 29us | 10 | - |  |
+| `file_at_x1` | 5 | 35us | 39us | 39us | 1 | - | 1 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+| `file_at_x10` | 5 | 237us | 317us | 317us | 10 | - | 10 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+| `file_at_x100` | 5 | 2.0ms | 2.4ms | 2.4ms | 100 | - | 100 个候选路径各做一次 file_at（含祖先 Tombstone 链查询） |
+
+### HTTP 端到端
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `health` | 75 | 95us | 214us | 358us | - | - |  |
+| `tree_root_depth1` | 25 | 202us | 335us | 400us | 1 | - |  |
+| `tree_l1_depth1` | 25 | 385us | 449us | 462us | 40 | - |  |
+| `tree_l2_depth1` | 25 | 393us | 513us | 522us | 40 | - |  |
+| `tree_leaf_depth1` | 25 | 261us | 401us | 449us | 10 | - |  |
+| `tree_root_depth2` | 20 | 385us | 425us | 446us | 41 | - |  |
+| `tree_leaf_hist_rev` | 20 | 522us | 751us | 758us | 10 | - |  |
+| `tree_root_hist_rev` | 1 | 6.53s | 6.53s | 6.53s | 1 | - |  |
+| `repo_info` | 25 | 52.4ms | 53.3ms | 53.4ms | - | - |  |
+| `log_50` | 25 | 1.3ms | 1.9ms | 2.0ms | 20000 | - |  |
+| `changes_100rev` | 20 | 4.3ms | 4.9ms | 5.2ms | 1010 | - |  |
+| `missing_1000` | 20 | 7.0ms | 7.5ms | 11.3ms | - | - |  |
+| `download_blob` | 50 | 300us | 495us | 589us | 7 | - |  |
+| `login_argon2id` | 5 | 113.9ms | 134.4ms | 134.4ms | - | - |  |
+| `commit_two_phase_10` | 10 | 8.1ms | 742.3ms | 742.3ms | 10 | - | prepare + commit 合计，含 10 条变更 |
+
+### 并发
+
+| 基准 | n | p50 | p95 | p99 | 规模 | 吞吐 | 备注 |
+|---|---|---|---|---|---|---|---|
+| `tree_root_depth1_c8` | 64 | 1.5ms | 2.7ms | 3.1ms | - | 3266/s | 并发 8，64 请求，吞吐 3266 req/s |
+| `tree_root_depth1_c32` | 64 | 4.6ms | 8.8ms | 14.7ms | - | 2388/s | 并发 32，64 请求，吞吐 2388 req/s |
+| `download_blob_c8` | 64 | 1.9ms | 11.1ms | 22.1ms | - | 558/s | 并发 8，64 请求，吞吐 558 req/s |
+| `download_blob_c32` | 64 | 11.8ms | 20.0ms | 25.1ms | - | 1042/s | 并发 32，64 请求，吞吐 1042 req/s |
+| `tree_hist_leaf_c8` | 64 | 3.9ms | 42.4ms | 67.9ms | - | 284/s | 并发 8，64 请求，吞吐 284 req/s |
+| `tree_hist_leaf_c32` | 64 | 9.5ms | 12.7ms | 13.0ms | - | 2461/s | 并发 32，64 请求，吞吐 2461 req/s |
+| `tree_head_file_c8` | 64 | 1.9ms | 22.3ms | 35.8ms | - | 383/s | 并发 8，64 请求，吞吐 383 req/s |
+| `tree_head_file_c32` | 64 | 4.2ms | 39.6ms | 63.1ms | - | 497/s | 并发 32，64 请求，吞吐 497 req/s |
+| `tree_hist_file_c8` | 64 | 2.3ms | 38.0ms | 40.3ms | - | 295/s | 并发 8，64 请求，吞吐 295 req/s |
+| `tree_hist_file_c32` | 64 | 4.0ms | 5.8ms | 9.0ms | - | 3257/s | 并发 32，64 请求，吞吐 3257 req/s |
+| `repo_info_c8` | 64 | 239.4ms | 325.4ms | 329.3ms | - | 31/s | 并发 8，64 请求，吞吐 31 req/s |
+| `repo_info_c32` | 64 | 739.5ms | 1.01s | 1.01s | - | 32/s | 并发 32，64 请求，吞吐 32 req/s |
+| `log_50_c8` | 64 | 3.6ms | 23.5ms | 40.2ms | - | 355/s | 并发 8，64 请求，吞吐 355 req/s |
+| `log_50_c32` | 64 | 9.0ms | 13.0ms | 13.3ms | - | 2339/s | 并发 32，64 请求，吞吐 2339 req/s |
+
+-- 压测结束，耗时 62s
+
+== 全部完成 ==
+原始数据: /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results
+生成汇总: python3 /Users/zzq7191/WorkBuddy/svn-copy-ai/scripts/m15_summary.py /Users/zzq7191/WorkBuddy/svn-copy-ai/bench-results

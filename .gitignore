@@ -1,0 +1,34 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+target/
+release/
+out/
+*.asar
+
+# 打包产物（本地产出，不进仓库）
+client/*.app/
+client/*.zip
+client/*.dmg
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# 临时文件与运行时日志（bench-results/_attic 里的 .log 是实测证据，保留）
+*.tmp
+*.dl-*
+npm-debug.log*
+yarn-error.log*
+*.server.log
+
+# 助手/会话内部数据（不属于产品代码）
+.workbuddy/
+
+# 本地环境
+.env
+.env.*

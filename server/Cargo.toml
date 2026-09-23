@@ -1,0 +1,41 @@
+[package]
+name = "b-artifact-server"
+version = "0.1.0"
+edition = "2021"
+description = "b-artifact 集中式二进制资产版本管理服务端"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "io-util", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+hex = "0.4"
+zstd = "0.13"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+unicode-normalization = "0.1"
+toml = "0.8"
+argon2 = "0.5"
+getrandom = "0.2"
+futures-util = "0.3"
+ldap3 = { version = "0.11", default-features = false, features = ["sync", "tls-rustls"] }
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+
+# M1.5 压测 harness：harness=false 让它就是一个普通可执行程序，
+# 从而可以直接使用 dev-dependencies（reqwest），不污染服务端二进制依赖。
+[[bench]]
+name = "m15_bench"
+path = "benches/m15_bench.rs"
+harness = false
+
+[profile.release]
+lto = true
+
+[profile.bench]
+lto = "thin"
+debug = false
