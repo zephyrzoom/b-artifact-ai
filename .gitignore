@@ -32,3 +32,6 @@ yarn-error.log*
 # 本地环境
 .env
 .env.*
+
+# 便于离线转移的仓库包
+*.bundle
