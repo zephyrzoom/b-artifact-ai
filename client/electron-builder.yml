@@ -25,9 +25,12 @@ files:
 
 asar: true
 
-# 用本地已解包的 Electron 分发，**不要联网下载**（沙箱里下载 100MB 要几分钟，
-# 而且每次跑都可能重新下；`node_modules/electron/dist` 就是同一个发行包的解压结果）
-electronDist: node_modules/electron/dist
+# Electron 分发**不写死在配置里**：
+# - CI / 有网环境：electron-builder 自己下载对应版本的 Electron（@electron/get，有缓存）；
+# - 本沙箱（无网）：`scripts/m4_package.sh` 显式传
+#   `--config.electronDist=node_modules/electron/dist`（setup_electron.sh 离线落位的分发）。
+# 教训：曾把 electronDist 写死为 node_modules/electron/dist，CI 上该目录不存在，
+# 三平台打包一起报 "The specified electronDist does not exist"。
 
 mac:
   category: public.app-category.developer-tools

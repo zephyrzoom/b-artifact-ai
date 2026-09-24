@@ -55,9 +55,9 @@ fi
 echo "  ✓ dist/（main + preload + renderer）与 build/icon.png"
 
 echo "== 2. electron-builder 打包 =="
-# 走配置里的 target（当前是 zip）。首次会在 ~/Library/Caches 里下载图标工具包；
-# Electron 分发用本地的（见 electron-builder.yml 的 electronDist）。
-(cd "$CLIENT" && npx electron-builder > "$WORK/pack.log" 2>&1) \
+# Electron 分发用本地离线落位的（setup_electron.sh 解压到 node_modules/electron/dist）；
+# 共享配置里不写 electronDist，CI（有网）由 electron-builder 自行下载。
+(cd "$CLIENT" && npx electron-builder --config.electronDist=node_modules/electron/dist > "$WORK/pack.log" 2>&1) \
   || { echo "打包失败："; tail -30 "$WORK/pack.log"; exit 1; }
 [ -x "$APP_BIN" ] || { echo "打包产物缺失：$APP_BIN"; tail -20 "$WORK/pack.log"; exit 1; }
 echo "  ✓ ${APP}（$(du -sh "$APP" | cut -f1)）"
