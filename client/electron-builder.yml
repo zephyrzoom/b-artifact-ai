@@ -6,6 +6,8 @@
 appId: com.bartifact.client
 productName: b-artifact
 copyright: b-artifact
+# 各平台共用的图标（scripts/make-icon.mjs 生成 build/icon.png，纯 node:zlib，无外部依赖）
+icon: build/icon.png
 
 directories:
   output: release
@@ -20,10 +22,6 @@ files:
   # 主进程只依赖 electron 与 Node 内置模块）。显式排除，避免把 Vue/Element Plus
   # 这些构建期依赖原样塞进 asar；将来真加了运行时依赖，打包冒烟会立刻暴露
   - '!node_modules/**'
-  # 运行时不从 node_modules 取任何东西（渲染层已由 Vite 预打包进 dist/renderer，
-  # 主进程只依赖 electron 与 Node 内置模块）。显式排除，避免把 Vue/Element Plus
-  # 这些构建期依赖原样塞进 asar；将来真加了运行时依赖，打包冒烟会立刻暴露
-  - '!node_modules/**'
 
 asar: true
 
@@ -33,7 +31,6 @@ electronDist: node_modules/electron/dist
 
 mac:
   category: public.app-category.developer-tools
-  icon: build/icon.png
   # 默认出 zip：它是 macOS 上合法的分发形态（解压后拖进「应用程序」即可），
   # 也是 electron-builder 的 autoUpdater 消费的格式。
   #
@@ -43,5 +40,22 @@ mac:
   #   mac.target: [dmg, zip]
   # 这一步与业务代码无关，纯粹是打包工具的下载依赖。
   target:
+    - target: zip
+      arch: [x64]
+
+# CI（GitHub Actions）跨平台打包用：本地 `npm run dist` 仅在当前平台构建，
+# 下面的 linux / windows 配置只在显式 --linux / --win 时生效，不影响本地 mac 构建。
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: tar.gz
+      arch: [x64]
+  category: Development
+
+windows:
+  target:
+    - target: nsis
+      arch: [x64]
     - target: zip
       arch: [x64]

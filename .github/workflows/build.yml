@@ -1,0 +1,191 @@
+name: Build & Package
+
+# 跨平台打包：每个 OS 用各自的 runner 原生构建（Rust+rusqlite 与 Electron 都不适合交叉编译）。
+#   - 后端：Rust 原生二进制 + 管理端静态站（admin/dist）→ tar.gz / zip
+#   - 前端：Electron 客户端 → 各平台安装包（AppImage/nsis/zip/mac zip）
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target_os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target_os: linux
+            electron_flag: --linux
+            ext: ""
+          - os: windows-latest
+            target_os: windows
+            electron_flag: --win
+            ext: ".exe"
+          # macos-13 = Intel x64，与 client/electron-builder.yml 的 mac.arch=x64 对齐
+          - os: macos-13
+            target_os: macos
+            electron_flag: --mac
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          # 客户端依赖树最大，用它的 lock 做 npm 缓存键
+          cache-dependency-path: client/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      # ---------- 管理端（Vue 静态站点，服务端在 /admin/ 下托管）----------
+      - name: Build admin (Vue)
+        working-directory: admin
+        run: |
+          npm ci
+          npm run build
+
+      # ---------- 服务端（Rust 原生二进制）----------
+      - name: Build server (Rust)
+        working-directory: server
+        run: cargo build --release
+
+      # ---------- 客户端（Electron）----------
+      - name: Install & build client
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+          npm run icon
+
+      - name: Package client (${{ matrix.target_os }})
+        working-directory: client
+        run: npx electron-builder ${{ matrix.electron_flag }} --x64
+
+      # ---------- 组装后端交付物：二进制 + admin/dist + 样例配置 ----------
+      - name: Assemble backend bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          OS="${{ matrix.target_os }}"
+          BIN="b-artifact-server${{ matrix.ext }}"
+          SRC="server/target/release/$BIN"
+          DEST="upload/b-artifact-server-$OS"
+          mkdir -p "$DEST/admin"
+          cp "$SRC" "$DEST/"
+          cp -r admin/dist "$DEST/admin/dist"
+          cat > "$DEST/b-artifact.toml.example" <<'TOML'
+          [server]
+          listen = "0.0.0.0:9000"
+          # 管理端静态站；默认即本目录下的 admin/dist，http://<host>:9000/admin/
+          admin_dir = "admin/dist"
+
+          [storage]
+          compression = "zstd"
+          max_file_size_mb = 2048
+
+          [auth]
+          session_ttl_days = 7
+          # 首个成功登录的用户自动成为系统管理员（本地 / LDAP 通用）
+          first_user_admin = true
+
+          # [auth.ldap]
+          # enabled = true
+          # url = "ldaps://ldap.example.com"
+          # user_base = "ou=people,dc=example,dc=com"
+          # user_filter = "(sAMAccountName={username})"
+          TOML
+          cat > "$DEST/README.txt" <<TXT
+          b-artifact 服务端（backend）— ${{ matrix.target_os }}
+
+          启动：
+            ./b-artifact-server --data-dir ./data --listen 0.0.0.0:9000
+          首次创建管理员（交互式输入密码）：
+            ./b-artifact-server --create-admin admin
+          管理端默认从本目录下的 admin/dist 提供（http://<host>:9000/admin/）。
+          把 b-artifact.toml.example 复制为 b-artifact.toml 可自定义监听地址 / LDAP。
+          TXT
+          echo "后端交付物已就绪：$DEST"
+
+      - name: Stage client artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload/client
+          cp -r client/release/. upload/client/ 2>/dev/null || true
+          echo "=== upload/ 内容 ==="
+          ls -R upload
+
+      # ---------- 后端打包成归档 ----------
+      - name: Archive backend (unix)
+        if: matrix.target_os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          OS="${{ matrix.target_os }}"
+          tar -czf "upload/b-artifact-server-$OS.tar.gz" -C "upload/b-artifact-server-$OS" .
+          rm -rf "upload/b-artifact-server-$OS"
+
+      - name: Archive backend (windows)
+        if: matrix.target_os == 'windows'
+        shell: pwsh
+        run: |
+          $OS = "${{ matrix.target_os }}"
+          Compress-Archive -Path "upload/b-artifact-server-$OS/*" -DestinationPath "upload/b-artifact-server-$OS.zip" -Force
+          Remove-Item -Recurse -Force "upload/b-artifact-server-$OS"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target_os }}
+          path: upload
+          if-no-files-found: warn
+
+  # 仅打 tag（v*）时把三个平台的产物汇总成一个 GitHub Release
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          pattern: dist-*
+          merge-multiple: false
+
+      - name: Flatten to release assets
+        run: |
+          mkdir -p release-assets
+          find all-artifacts -type f -exec cp {} release-assets/ \;
+          echo "=== 待发布文件 ==="
+          ls -lh release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
