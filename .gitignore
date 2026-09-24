@@ -26,6 +26,12 @@ npm-debug.log*
 yarn-error.log*
 *.server.log
 
+# 压测快照：只留被压测报告引用过的那几个（bench-results / -final / -full-p4 /
+# -m15-baseline / -m18）；无引用的残留快照不进仓库，新快照别顺手提交。
+bench-results-full-p2/
+bench-results-full-p8/
+bench-results-m17/
+
 # 助手/会话内部数据（不属于产品代码）
 .workbuddy/
 
