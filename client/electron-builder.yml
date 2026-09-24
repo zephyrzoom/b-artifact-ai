@@ -25,6 +25,15 @@ files:
 
 asar: true
 
+# 体积优化（301M 的 .app 里 297M 是 Electron Framework，其中 55M 是 220 种语言的
+# .lproj/.pak 语言包——应用只有中文界面，留 zh-CN + en-US 兜底就够了）
+electronLanguages:
+  - zh-CN
+  - en-US
+
+# 最高压缩比：发行包（zip / portable）能再小一截，代价是打包慢一点（CI 可接受）
+compression: maximum
+
 # Electron 分发**不写死在配置里**：
 # - CI / 有网环境：electron-builder 自己下载对应版本的 Electron（@electron/get，有缓存）；
 # - 本沙箱（无网）：`scripts/m4_package.sh` 显式传
