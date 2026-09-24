@@ -56,9 +56,9 @@ linux:
       arch: [x64]
   category: Development
 
+# Windows 只出**一个 portable 单文件**（免安装、双击即用；用户明确不要 nsis 安装器、zip 等）
 win:
   target:
-    - target: nsis
+    - target: portable
       arch: [x64]
-    - target: zip
-      arch: [x64]
+  artifactName: ${productName}-${version}-portable.${ext}

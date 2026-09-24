@@ -2,7 +2,7 @@ name: Build & Package
 
 # 跨平台打包：每个 OS 用各自的 runner 原生构建（Rust+rusqlite 与 Electron 都不适合交叉编译）。
 #   - 后端：Rust 原生二进制 + 管理端静态站（admin/dist）→ tar.gz / zip
-#   - 前端：Electron 客户端 → 各平台安装包（AppImage/nsis/zip/mac zip）
+#   - 前端：Electron 客户端 → linux AppImage+tar.gz / win portable 单文件 / mac zip
 on:
   push:
     branches: [main]
@@ -132,7 +132,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p upload/client
-          cp -r client/release/. upload/client/ 2>/dev/null || true
+          # 只搬 release 顶层的分发文件本身；不要 electron-builder 顺手生成的
+          # *.blockmap（差量更新索引）、builder-debug.yml 和 *-unpacked/ 解包目录（-type f 只取文件）。
+          # Windows(portable) 搬完恰好就是一个 exe；linux 为 AppImage+tar.gz；mac 为 zip。
+          find client/release -maxdepth 1 -type f \
+            ! -name '*.blockmap' \
+            ! -name 'builder-debug.yml' \
+            ! -name 'builder-effective-config.yaml' \
+            -exec cp {} upload/client/ \;
           echo "=== upload/ 内容 ==="
           ls -R upload
 
