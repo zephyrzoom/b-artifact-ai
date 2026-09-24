@@ -44,7 +44,7 @@ mac:
       arch: [x64]
 
 # CI（GitHub Actions）跨平台打包用：本地 `npm run dist` 仅在当前平台构建，
-# 下面的 linux / windows 配置只在显式 --linux / --win 时生效，不影响本地 mac 构建。
+# 下面的 linux / win 配置只在显式 --linux / --win 时生效，不影响本地 mac 构建。
 linux:
   target:
     - target: AppImage
@@ -53,7 +53,7 @@ linux:
       arch: [x64]
   category: Development
 
-windows:
+win:
   target:
     - target: nsis
       arch: [x64]

@@ -80,7 +80,7 @@ jobs:
 
       - name: Package client (${{ matrix.target_os }})
         working-directory: client
-        run: npx electron-builder ${{ matrix.electron_flag }} --x64
+        run: npx electron-builder ${{ matrix.electron_flag }} --x64 --publish never
 
       # ---------- 组装后端交付物：二进制 + admin/dist + 样例配置 ----------
       - name: Assemble backend bundle
