@@ -50,10 +50,13 @@ mac:
   # dmgbuild 工具包（`electron-userland/electron-builder-binaries` 那个 host 完全不可达，
   # curl 直接返回 000，builder 报 502）。要出 dmg 就在有网的环境里加：
   #   mac.target: [dmg, zip]
-  # 这一步与业务代码无关，纯粹是打包工具的下载依赖。
+  #
+  # **arch 不在这里写死**（v0.4.23）：留空 = 跟随构建机器的架构（本地 Intel 出 x64、
+  # Apple Silicon 出 arm64），CI 则由 build.yml 显式传 `--arm64`。原先写死 `x64` 是
+  # macos-13 时代的产物——那时 macOS runner 必然是 Intel；现在 macos-latest 已是
+  # Apple Silicon，写死 x64 会让 CI 意图（arm64）与配置（x64）静默打架。
   target:
     - target: zip
-      arch: [x64]
 
 # CI（GitHub Actions）跨平台打包用：本地 `npm run dist` 仅在当前平台构建，
 # 下面的 linux / win 配置只在显式 --linux / --win 时生效，不影响本地 mac 构建。

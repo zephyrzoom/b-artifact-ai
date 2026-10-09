@@ -182,6 +182,9 @@ npm run dist:dir    # 只出 .app（不压缩，快）
 | `b-artifact-0.1.0-mac.zip` | ~126 MB | 分发用：解压后拖进「应用程序」 |
 | `Contents/Resources/app.asar` | **1.5 MB** | 只含 `dist/`（main/preload/renderer）与 `package.json` |
 
+> `.app` 所在目录名跟架构走：Intel 是 `release/mac`，Apple Silicon 是 `release/mac-arm64`。
+> `npm run dist` 不写死架构，跟随本机；CI 则由 `build.yml` 矩阵的 `arch` 字段显式指定。
+
 ```bash
 scripts/m4_package.sh    # 打包门禁：构建 → 打包 → 校验 asar → 用打包产物跑同一套 143 项冒烟
 node scripts/check_asar.mjs   # 单独跑 asar 门禁（自动找 client/release 下的 app.asar）
@@ -219,6 +222,24 @@ node scripts/check_asar.mjs   # 单独跑 asar 门禁（自动找 client/release
    顺手把缺渲染层的半成品打进了 exe。`build.yml` 现在每条 npm 命令各占一个 step。
 
 > 加任何门禁都要**先验一次它能不能失败**，否则写出来的只是一段永远绿的代码。
+
+### 跨平台打包的平台换代陷阱（macOS）
+
+2026-10-09 修掉的一条：**CI 的 mac 腿写的 `macos-13` 其实早已失效**。
+
+- `macos-13` 镜像 **2025-12-04 完全退役**，runner 标签不存在了 —— 那条腿不是"版本旧"，是**起不来**。
+- `macos-latest` 已于 **2026-06-15** 从 macOS 15 迁到 **macOS 26**，底层机器同时
+  从 Intel 换成 **Apple Silicon**。于是「macOS ⇒ x64」这个写在注释和配置里的
+  隐含假设**彻底不成立**。
+- 现在定为**全链路 arm64**：矩阵新增 `arch` 字段，`electron-builder --${{ matrix.arch }}`
+  取代写死的 `--x64`；`client/electron-builder.yml` 的 `mac.target` 去掉 `arch: [x64]`
+  （留空 = 跟随构建机，否则与 CI 传入值静默打架）；后端归档名带架构
+  （`b-artifact-server-macos-arm64.tar.gz`，因为 Rust 二进制是跟着 runner 原生编译的）。
+- **代价**：不再覆盖 Intel Mac（需 Rosetta 2）。要双架构就加一条
+  `macos-15-intel` + `arch: x64` 的矩阵腿（该镜像 2027-08 退役）。
+
+> 平台换代时，这类隐含假设**不会报错**——只会让腿起不来、或产物架构悄悄错位。
+> 所以架构要显式写进矩阵，别靠 runner 标签推导。
 
 真跑一遍全链路（自建服务端 + 真实 Electron，143 项断言，含自动同步与刷新后勾选保持、树上增删、双击展开/收起、右键菜单、树上加锁/解锁/强制解锁、部分检出、冲突解决、历史下载与设置）：
 

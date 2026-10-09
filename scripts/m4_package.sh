@@ -29,7 +29,15 @@ NODE="${NODE:-node}"
 CARGO="${CARGO:-cargo}"
 CLIENT="$ROOT/client"
 BIN="$ROOT/server/target/debug/b-artifact-server"
-APP="$CLIENT/release/mac/b-artifact.app"
+
+# electron-builder 的 mac 产物目录名带架构后缀：Intel 是 release/mac，
+# Apple Silicon 是 release/mac-arm64。原先这里写死 release/mac，在 ARM 机器上
+# 会误报「打包产物缺失」（v0.4.23）。
+case "$(uname -m)" in
+  arm64 | aarch64) APP_DIR="mac-arm64" ;;
+  *) APP_DIR="mac" ;;
+esac
+APP="$CLIENT/release/$APP_DIR/b-artifact.app"
 APP_BIN="$APP/Contents/MacOS/b-artifact"
 
 ADMIN="pkguser"

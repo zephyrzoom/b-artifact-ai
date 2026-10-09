@@ -3,6 +3,11 @@ name: Build & Package
 # 跨平台打包：每个 OS 用各自的 runner 原生构建（Rust+rusqlite 与 Electron 都不适合交叉编译）。
 #   - 后端：Rust 原生二进制 + 管理端静态站（admin/dist）→ tar.gz / zip
 #   - 前端：Electron 客户端 → linux AppImage+tar.gz / win portable 单文件 / mac zip
+#
+# **runner 标签与产物架构必须显式配对**。macos-latest 已于 2026-06 从 macOS 15 迁到 macOS 26，
+# 底层机器同时从 Intel 换成 Apple Silicon——"macOS ⇒ x64"这个 macos-13 时代的隐含假设已经不成立。
+# 所以架构由矩阵的 `arch` 字段显式传给 electron-builder，而不是靠 runner 标签隐式推导：
+# 平台哪天再迁一次，产物架构不会跟着静默错位。
 on:
   push:
     branches: [main]
@@ -27,15 +32,21 @@ jobs:
         include:
           - os: ubuntu-latest
             target_os: linux
+            arch: x64
             electron_flag: --linux
             ext: ""
           - os: windows-latest
             target_os: windows
+            arch: x64
             electron_flag: --win
             ext: ".exe"
-          # macos-13 = Intel x64，与 client/electron-builder.yml 的 mac.arch=x64 对齐
-          - os: macos-13
+          # macos-latest = macOS 26，**Apple Silicon（arm64）**。
+          # 原先这里是 macos-13（Intel x64），而该镜像已于 2025-12-04 完全退役、标签已不存在，
+          # 这条腿实际上已经起不来 runner。现按最新系统重建，产物随之改为 arm64
+          # （与 client/electron-builder.yml 的 mac 段一致）。
+          - os: macos-latest
             target_os: macos
+            arch: arm64
             electron_flag: --mac
             ext: ""
 
@@ -90,9 +101,9 @@ jobs:
         working-directory: client
         run: npm run icon
 
-      - name: Package client (${{ matrix.target_os }})
+      - name: Package client (${{ matrix.target_os }}-${{ matrix.arch }})
         working-directory: client
-        run: npx electron-builder ${{ matrix.electron_flag }} --x64 --publish never
+        run: npx electron-builder ${{ matrix.electron_flag }} --${{ matrix.arch }} --publish never
 
       # 打包门禁：asar 里**必须**含渲染层入口。
       # 为什么要这道：打包器只按 `files` 收集，不校验应用能不能起得来。缺 index.html 的包
@@ -107,9 +118,12 @@ jobs:
         run: |
           set -euo pipefail
           OS="${{ matrix.target_os }}"
+          ARCH="${{ matrix.arch }}"
           BIN="b-artifact-server${{ matrix.ext }}"
           SRC="server/target/release/$BIN"
-          DEST="upload/b-artifact-server-$OS"
+          # 目录名带上架构：Rust 二进制是**跟着 runner 架构原生编译**的（mac 腿现为 arm64），
+          # 名字里不标架构的话，将来再加一条 x64 腿就会互相覆盖，用户也无从判断能不能跑。
+          DEST="upload/b-artifact-server-$OS-$ARCH"
           mkdir -p "$DEST/admin"
           cp "$SRC" "$DEST/"
           cp -r admin/dist "$DEST/admin/dist"
@@ -135,7 +149,7 @@ jobs:
           # user_filter = "(sAMAccountName={username})"
           TOML
           cat > "$DEST/README.txt" <<TXT
-          b-artifact 服务端（backend）— ${{ matrix.target_os }}
+          b-artifact 服务端（backend）— ${{ matrix.target_os }} / ${{ matrix.arch }}
 
           启动：
             ./b-artifact-server --data-dir ./data --listen 0.0.0.0:9000
@@ -169,16 +183,18 @@ jobs:
         run: |
           set -euo pipefail
           OS="${{ matrix.target_os }}"
-          tar -czf "upload/b-artifact-server-$OS.tar.gz" -C "upload/b-artifact-server-$OS" .
-          rm -rf "upload/b-artifact-server-$OS"
+          ARCH="${{ matrix.arch }}"
+          tar -czf "upload/b-artifact-server-$OS-$ARCH.tar.gz" -C "upload/b-artifact-server-$OS-$ARCH" .
+          rm -rf "upload/b-artifact-server-$OS-$ARCH"
 
       - name: Archive backend (windows)
         if: matrix.target_os == 'windows'
         shell: pwsh
         run: |
           $OS = "${{ matrix.target_os }}"
-          Compress-Archive -Path "upload/b-artifact-server-$OS/*" -DestinationPath "upload/b-artifact-server-$OS.zip" -Force
-          Remove-Item -Recurse -Force "upload/b-artifact-server-$OS"
+          $ARCH = "${{ matrix.arch }}"
+          Compress-Archive -Path "upload/b-artifact-server-$OS-$ARCH/*" -DestinationPath "upload/b-artifact-server-$OS-$ARCH.zip" -Force
+          Remove-Item -Recurse -Force "upload/b-artifact-server-$OS-$ARCH"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
