@@ -63,6 +63,11 @@ echo "== 2. electron-builder 打包 =="
 echo "  ✓ ${APP}（$(du -sh "$APP" | cut -f1)）"
 echo "  ✓ asar $(du -h "$APP/Contents/Resources/app.asar" | cut -f1)（应只含 dist/ 与 package.json）"
 
+# 门禁：asar 必须含渲染层入口。打包器只按 `files` 收集，不校验应用能不能起得来——
+# 缺 index.html 的包会一路绿灯到用户双击才炸（Windows CI 腿真实踩过）。
+NODE "$ROOT/scripts/check_asar.mjs" "$APP/Contents/Resources/app.asar" \
+  || { echo "asar 门禁未通过：打包产物缺必需文件"; exit 1; }
+
 ARTIFACTS=$(ls "$CLIENT/release"/*.dmg "$CLIENT/release"/*.zip 2>/dev/null)
 if [ -n "$ARTIFACTS" ]; then
   echo "$ARTIFACTS" | while read -r f; do echo "  ✓ $(basename "$f") $(du -h "$f" | cut -f1)"; done

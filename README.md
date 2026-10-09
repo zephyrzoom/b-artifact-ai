@@ -10,7 +10,7 @@
 
 | 里程碑 | 状态 |
 |---|---|
-| 方案设计 | ✅ `docs/架构设计方案.md`（**v0.4.17**，决策点全部定案；#2 锁策略 / #5 目录锁于 v0.4.17 修订） |
+| 方案设计 | ✅ `docs/架构设计方案.md`（**v0.4.22**，决策点全部定案；#2 锁策略 / #5 目录锁于 v0.4.17 修订；v0.4.22 修 Windows 产物缺渲染层） |
 | M0 服务端骨架 | ✅ 完成：schema 迁移、BlobStore（zstd auto）、Path-History 核心（Tombstone / restore / HEAD 快路径 / manifest_hash 异步）、可启动空服务端 |
 | M1 核心链路（认证 + 建仓 + 分块上传 + 两阶段提交 + 浏览查询） | ✅ 完成：本地/LDAP 认证、会话、登录限流、`--create-admin`、仓库管理、整块/分块上传、下载（Range/HEAD/zstd 流式解压）、两阶段提交（幂等重放/OUT_OF_DATE）、tree/log/changes/info；单测 26 + 集成测试 5 + 冒烟 34 全绿 |
 | M1.5 压测 | ✅ 完成：造数脚本（`xs` 1k → `full` **1M 文件 / 100k 修订**）、进程内 axum 压测 harness、四档实测。**结论：Path-History 两条核心查询在 `full` 档不可用**（`list_dir_at_root_head` 86.9 s、`tree?rev=` 端到端 75.5 s、`apply_commit_1000` 267.8 s），定位 6 个瓶颈（B1 前缀 LIKE 未下推索引、B2 语句重复 prepare 为 P0 阻断项）。**上述三条已于 M1.6 修复**。见[压测报告](docs/压测报告-M1.5.md) |
@@ -26,6 +26,7 @@
 | M4 第七阶段（打包出可分发产物） | ✅ 完成：`electron-builder.yml`（asar 只带 `dist/` 与 `package.json`，**1.5 MB**）、`scripts/make-icon.mjs`（零依赖手写 PNG 编码器出 1024×1024 图标）、`scripts/m4_package.sh`（构建 → 打包 → **拿打包产物跑同一套 67 项冒烟**）。产物：`b-artifact.app`（307 MB）+ `b-artifact-0.1.0-mac.zip`（126 MB）。遗留：dmg 需联网下载工具包（本沙箱不可达）；**代码签名与公证未做**，对外分发需补 |
 | **M4.8 需求变更轮（v0.4.17）** | ✅ **完成**（2026-09-15，来自真实使用的 8 项反馈）：①删 `advisory` 与目录锁，唯一语义 = 每个变更路径都必须本人持锁，建仓不再选策略 ②口令强度策略（≥8 **字符** + 数字/大写/小写/符号，替换现有 4 处 `len() < 8`——其中三处数的是**字节**）③管理端仓库列表「先锁后提交」列显示空白标签的修复（随①删列）④用户信息去邮箱 ⑤加锁入口移入工作副本 ⑥工作副本改**目录树** ⑦`fs.watch` 自动同步 + 去「标记新增」+ 说明可空 + 树上直接增删 ⑧「打开已有副本」入口。**上线反馈陆续改了这些**：锁不再单独占菜单（并入工作副本树）、修掉「选中目录加锁却锁住某个文件且解不开」、目录树支持**双击展开/收起**、界面术语统一为「强制解锁」、**刷新不再冲掉勾选**；**加锁改成点了就锁（不弹备注框）**、**锁动作只在右键菜单**（工具栏不再放按钮）、**提交后自动解锁**（本次提交文件上本人持有的锁全部释放）、右键菜单点别处即关、**从仓库页检出/打开后自动跳到工作副本页**、「打开已有副本」弹窗的操作列钉右（不必拉横向滚动条）+ 检出后最近列表即时刷新、**刚打开工作副本时树上不预勾选任何项**、**删除/还原按勾选项执行**（不是高亮那一行，且删除后清空勾选）；「**部分检出**」这一轮改名（原名"稀疏检出"）；**去掉「新建文件」功能**（新建目录保留）；**忽略规则从设置移到工作副本**（编辑本副本的 `.b-artifactignore`，不再有全局追加规则）；顺带修掉"监听抑制窗口里的事件被丢弃"与"窗口被遮挡时定时器被节流"；**仓库页的部分检出目录树不再要求先打开工作副本**（仓库级读通道显式带 repo）；「忽略规则」与「打开已有副本」弹窗**可拖动**（不再挡住后面的目录树）；**设置里可配「检出目录的默认路径」**，检出时默认 `该路径/仓库名`。门禁：服务端单测 **79**（+集成 23）、客户端单测 **558** + 真实 Electron **143 项**、管理端单测 **137** + 浏览器 E2E **31 项**、冒烟 m1 **54** / m3 **69** / m4 **68** 全绿 |
 | M4 剩余（文本 diff、Windows 矩阵、签名） | ⬜ 未开始 |
+| **M4.9 Windows 产物修复轮（v0.4.22）** | ✅ **完成**（2026-10-09）：CI 打出的 win portable exe 双击报「渲染层尚未构建」——`dist/renderer` 压根不在 asar 里。根因是两条独立缺陷在 Windows 腿叠加且**全被 CI 绿灯放行**：①`build.mjs` spawn 的是 POSIX-only 的 `.bin/vite`（Windows 上跑不了，无扩展名 shim跑不动、`.cmd` 又被 Node ≥18.20.2/20.12.2/22 以 EINVAL 拒）；②`build.yml` 把三条 npm 命令串在同一个 pwsh step 里，pwsh 不拦原生命令非零退出（GitHub 只在末尾查一次 `$LASTEXITCODE`），`npm run build` 的失败被 `npm run icon` 盖成 0。修法：build.mjs 改用 `process.execPath` + `vite/bin/vite.js` 并在末尾断言三份产物齐全；CI 每条命令各占一个 step；新增 `scripts/check_asar.mjs`（零依赖直读 asar pickle 头）断言 asar 齐全，CI 三平台 + `m4_package.sh` 都跑。**门禁按老规矩验过能不能失败**（追加不存在路径 → 确认 RC=1）。客户端单测 **558** 全绿 |
 | **M1.7 服务端性能轮（历史修订列目录）** | ✅ 完成：清掉 M1.6 唯一未达标项。`tree?rev=<旧修订>` 端到端 **6557.6 ms → 15.77 ms（416×）**、`rev=head` **7.4 s → 0.049 ms**。三个根因：缺 HEAD 快路径、按整棵子树枚举候选（改为"HEAD 直接子项 ∪ (rev, head] 删除增量"）、**`head_entries.changed_rev` 存量库被污染**（新增迁移 006 从 `changes` 重算，修掉界面上"最后变更修订"全显示同一个值的错）。新增差分验证脚本 `scripts/verify_list_dir_at.py`（旧语义参考实现 vs 实际输出，30/30 组一致）。见 [压测报告](docs/压测报告-M1.7.md) |
 | M5 打磨发布 | ⬜ 未开始 |
 
@@ -182,18 +183,42 @@ npm run dist:dir    # 只出 .app（不压缩，快）
 | `Contents/Resources/app.asar` | **1.5 MB** | 只含 `dist/`（main/preload/renderer）与 `package.json` |
 
 ```bash
-scripts/m4_package.sh    # 打包门禁：构建 → 打包 → 用打包产物跑同一套 143 项冒烟
+scripts/m4_package.sh    # 打包门禁：构建 → 打包 → 校验 asar → 用打包产物跑同一套 143 项冒烟
+node scripts/check_asar.mjs   # 单独跑 asar 门禁（自动找 client/release 下的 app.asar）
 ```
 
-两条要注意的：
+三条要注意的：
 
 - **`dependencies` 是空的**。渲染层已被 Vite 预打包进 `dist/renderer`，主进程只依赖 `electron`
   与 Node 内置模块——运行时不从 `node_modules` 取任何东西。所以 Vue / Element Plus / Pinia
   全在 `devDependencies`，asar 因此只有 1.5 MB。将来真加了运行时依赖，
   `files: ['!node_modules/**']` 会让它缺席——**打包产物冒烟会立刻暴露**。
+- **打包器不校验应用能不能起得来**：它只按 `files` 收集文件，一份构建到一半的 `dist/`
+  （例如渲染层那步失败，只剩 main + preload）会被顺顺利利打包上传，直到用户双击才看到
+  「渲染层尚未构建」。`scripts/check_asar.mjs` 就是补这个洞的——断言 asar 里
+  `dist/main/index.js` / `dist/preload/index.cjs` / `dist/renderer/index.html` 三项齐全，
+  缺任一退出非 0。CI 三平台打包后都跑，本地 `m4_package.sh` 也跑。零依赖（直接读 asar 的
+  pickle 头解析文件树，不 spawn `npx asar`——那在三平台上可执行文件名各不相同，又是一个
+  Windows 陷阱）。
 - **产物未做代码签名与公证**（沙箱里没有 Developer ID 证书）。本机可直接运行；
   分发给别人时对方需要右键「打开」绕过 Gatekeeper，正式对外发布要补签名 + 公证。
   `dmg` 目标同理暂时没出（它要额外下载工具包，见 `client/electron-builder.yml` 的注释）。
+
+### 跨平台打包的两个 Windows 陷阱
+
+2026-10-09 修掉的两条，都是「CI 绿灯 → 用户双击 exe 才炸」的典型：
+
+1. **不要 spawn `node_modules/.bin/*`**。那是给 `sh` 用的**无扩展名**脚本；Windows 上
+   `npm ci` 生成的是 `vite` / `vite.cmd` / `vite.ps1`，只有 `.cmd` 能跑，而 `spawnSync`
+   不带 `shell: true` 时既跑不了无扩展名的、跑 `.cmd` 又会被 Node ≥18.20.2/20.12.2/22
+   直接 EINVAL（CVE-2024-27980 的修复）。**一律用 `process.execPath` + 包的 JS 入口**
+   （`client/scripts/build.mjs` 现在跑的是 `node_modules/vite/bin/vite.js`）。
+2. **一条 CI step 里不要串多条命令**。pwsh 的 `$ErrorActionPreference='Stop'` **不拦原生命令
+   的非零退出**，GitHub 也只在脚本末尾查一次 `$LASTEXITCODE`——前一条挂了、后一条成功，
+   整个步骤就是绿的。当时正是 `npm run build` 挂了被 `npm run icon` 盖成 0，electron-builder
+   顺手把缺渲染层的半成品打进了 exe。`build.yml` 现在每条 npm 命令各占一个 step。
+
+> 加任何门禁都要**先验一次它能不能失败**，否则写出来的只是一段永远绿的代码。
 
 真跑一遍全链路（自建服务端 + 真实 Electron，143 项断言，含自动同步与刷新后勾选保持、树上增删、双击展开/收起、右键菜单、树上加锁/解锁/强制解锁、部分检出、冲突解决、历史下载与设置）：
 

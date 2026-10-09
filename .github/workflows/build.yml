@@ -71,16 +71,35 @@ jobs:
         run: cargo build --release
 
       # ---------- 客户端（Electron）----------
-      - name: Install & build client
+      # **每条 npm 命令各占一个 step，不要串在同一个 run: 里。**
+      # 踩过的坑：Windows 腿的 run: 里串了 `npm ci` / `npm run build` / `npm run icon`，
+      # 其中 `npm run build` 因build.mjs 用了 POSIX-only 的 `.bin/vite` 而失败，但 pwsh 的
+      # `$ErrorActionPreference='Stop'` 默认不拦原生命令的非零退出，GitHub 也只在脚本**末尾**
+      # 查一次 `$LASTEXITCODE`——于是紧接着的 `npm run icon`（纯 node，正常）把退出码盖成 0，
+      # 步骤绿灯通过，electron-builder 顺手把「只有 main+preload、没有 renderer」的半成品
+      # 打进 exe，直到用户双击才看到「渲染层尚未构建」。拆开之后每步各自查退出码。
+      - name: Install client deps
         working-directory: client
-        run: |
-          npm ci
-          npm run build
-          npm run icon
+        run: npm ci
+
+      - name: Build client (main + preload + renderer)
+        working-directory: client
+        run: npm run build
+
+      - name: Generate client icon
+        working-directory: client
+        run: npm run icon
 
       - name: Package client (${{ matrix.target_os }})
         working-directory: client
         run: npx electron-builder ${{ matrix.electron_flag }} --x64 --publish never
+
+      # 打包门禁：asar 里**必须**含渲染层入口。
+      # 为什么要这道：打包器只按 `files` 收集，不校验应用能不能起得来。缺 index.html 的包
+      # 能顺利通过构建、打包、上传，直到用户双击exe 才暴露（真实踩过）。三平台都跑——
+      # 这正是上一条缺陷能一路绿灯的原因：只有 Windows 腿出问题，却没有任何跨平台断言。
+      - name: Verify asar contains renderer entry
+        run: node scripts/check_asar.mjs
 
       # ---------- 组装后端交付物：二进制 + admin/dist + 样例配置 ----------
       - name: Assemble backend bundle
