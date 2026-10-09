@@ -128,36 +128,83 @@ jobs:
           cp "$SRC" "$DEST/"
           cp -r admin/dist "$DEST/admin/dist"
           cat > "$DEST/b-artifact.toml.example" <<'TOML'
+          # b-artifact 服务端配置示例
+          # 用法：把本文件复制为 b-artifact.toml 后修改。放到 exe 同目录即可被自动发现，
+          # 也可 b-artifact-server.exe --config <本文件路径> 显式指定。
+          # 启动日志会打印「配置文件: ...」一行，用它确认到底读的是哪份配置。
+          #
+          # 注意（v0.4.24）：本文件里的每一项都必须与实际实现一致——服务端已开启
+          # deny_unknown_fields，写错的配置项会**直接报错退出**，不再被静默忽略。
+
           [server]
           listen = "0.0.0.0:9000"
-          # 管理端静态站；默认即本目录下的 admin/dist，http://<host>:9000/admin/
+          # 管理端静态站；相对路径相对进程工作目录，注册成 Windows 服务时 CWD 往往是
+          # C:\Windows\System32，服务化部署建议在此写绝对路径。
           admin_dir = "admin/dist"
+          # data_dir = "D:/b-artifact/data"
 
           [storage]
-          compression = "zstd"
+          #合法值：off | auto | always（v0.4.24 修正：此前误写 "zstd"，是非法值）
+          compression = "auto"
           max_file_size_mb = 2048
+          chunk_threshold_mb = 64
 
           [auth]
+          local_enabled = true              # false = 只走域账号，本地口令校验完全跳过
           session_ttl_days = 7
+          # 连续失败 login_max_fails 次后锁定 login_lockout_secs 秒
+          login_max_fails = 5
+          login_lockout_secs = 60
           # 首个成功登录的用户自动成为系统管理员（本地 / LDAP 通用）
           first_user_admin = true
 
-          # [auth.ldap]
-          # enabled = true
-          # url = "ldaps://ldap.example.com"
-          # user_base = "ou=people,dc=example,dc=com"
-          # user_filter = "(sAMAccountName={username})"
+          [db]
+          pool_size = 4
+
+          # ---- 企业域账号统一登录（LDAP）----
+          # 注意是 [auth.ldap]（嵌套在 [auth] 下），不是顶层 [ldap]。
+          # 必填四项：url / bind_dn / bind_password / user_base。
+          # 启用后请把 [auth] 的 local_enabled 按需调整。
+          [auth.ldap]
+          enabled = false
+          url = "ldaps://ldap.example.com:636"
+          # 明文 ldap:// 仅限内网调试，需显式打开，否则启动登录时报错拒绝
+          allow_insecure = false
+          bind_dn = "cn=svc-b-artifact,ou=service,dc=example,dc=com"
+          bind_password = "改成真实密码"
+          user_base = "ou=people,dc=example,dc=com"
+          # 搜索过滤器。Active Directory 必须改成：
+          #   user_filter = "(sAMAccountName={username})"
+          # 不填则默认 (uid={username})。填错会导致搜不到用户，
+          # 而登录页只显示"用户名或密码错误"，看不出是过滤器的问题。
+          user_filter = "(uid={username})"
+          attr_display_name = "cn"
+          # Active Directory 必须改成 objectGUID（二进制值，服务端自动按 hex 存储）
+          attr_unique_id = "entryUUID"
           TOML
           cat > "$DEST/README.txt" <<TXT
           b-artifact 服务端（backend）— ${{ matrix.target_os }} / ${{ matrix.arch }}
 
-          启动：
-            ./b-artifact-server --data-dir ./data --listen 0.0.0.0:9000
-          首次创建管理员（交互式输入密码）：
-            ./b-artifact-server --create-admin admin
+          启动（推荐：用本目录的配置文件，不带任何参数即可）
+            b-artifact-server${{ matrix.ext }}
+
+          启动（显式指定配置文件）
+            b-artifact-server${{ matrix.ext }} --config "D:/path/to/b-artifact.toml"
+
+          首次创建管理员（交互式输入密码）
+            b-artifact-server${{ matrix.ext }} --create-admin admin
+
+          配置文件：
+            把 b-artifact.toml.example 复制为 b-artifact.toml 后修改，
+            与 exe 放同一目录即可自动生效（也可 --config 显式指定）。
+            启动日志会打印「配置文件: ...」，用它确认读的是哪份配置。
+            ——注意：不存在时服务端**静默使用默认值**，所以配置没生效时先看这一行。
+
+          数据目录默认 ./data（相对进程工作目录）；注册成 Windows 服务时建议在
+          配置文件里写绝对路径 data_dir。
+
           管理端默认从本目录下的 admin/dist 提供（http://<host>:9000/admin/）。
-          把 b-artifact.toml.example 复制为 b-artifact.toml 可自定义监听地址 / LDAP。
-          TXT
+          TOML
           echo "后端交付物已就绪：$DEST"
 
       - name: Stage client artifacts

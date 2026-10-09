@@ -21,7 +21,9 @@ b-artifact-server — 集中式二进制资产版本管理服务端
 用法: b-artifact-server [选项]
 
 选项:
-  --config <FILE>          TOML 配置文件（见 docs/架构设计方案.md §11.2）
+  --config <FILE>          TOML 配置文件（见 docs/架构设计方案.md §11.2）。
+                             不指定时自动探测：exe 同目录 → 当前工作目录下的 b-artifact.toml。
+                             启动日志会打印最终采用的配置来源。
   --data-dir <DIR>         数据目录（默认 ./data，覆盖配置文件）
   --listen <ADDR>          监听地址（默认 127.0.0.1:8080，覆盖配置文件）
   --admin-dir <DIR>        管理端前端构建产物目录（默认 admin/dist）
@@ -73,7 +75,21 @@ fn run(
     admin_dir: Option<String>,
     create_admin: Option<String>,
 ) -> Result<(), error::AppError> {
-    let mut cfg = Config::load(config_path.map(PathBuf::from).as_deref())?;
+    // v0.4.24：未显式指定 --config 时自动探测 exe 同目录 / CWD 下的 b-artifact.toml。
+    // "配置改了没生效"最常见的原因就是文件放对了却没人去读 —— 现在启动日志会打印来源路径，
+    // 一眼就能确认"到底读的是哪份配置"。
+    let (effective_config, config_source) = match config_path {
+        Some(p) => (Some(PathBuf::from(p)), format!("命令行 --config {}", p)),
+        None => match Config::discover_default() {
+            Some(p) => {
+                let src = p.display().to_string();
+                (Some(p), format!("自动探测到 {}", src))
+            }
+            None => (None, "未找到配置文件（全部使用默认值）".to_string()),
+        },
+    };
+
+    let mut cfg = Config::load(effective_config.as_deref())?;
     if let Some(d) = data_dir {
         cfg.server.data_dir = d;
     }
@@ -96,6 +112,7 @@ fn run(
 
     // --create-admin：独立命令模式（不启动服务）
     if let Some(name) = create_admin {
+        println!("配置文件: {config_source}");
         create_admin_user(&mut conn, &name)?;
         return Ok(());
     }
@@ -128,6 +145,7 @@ fn run(
             cfg.server.listen,
             data_dir.display()
         );
+        println!("配置文件: {config_source}");
         let admin_dir = PathBuf::from(&cfg.server.admin_dir);
         if admin_dir.join("index.html").exists() {
             println!("管理端: http://{}/admin/", cfg.server.listen);

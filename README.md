@@ -10,7 +10,7 @@
 
 | 里程碑 | 状态 |
 |---|---|
-| 方案设计 | ✅ `docs/架构设计方案.md`（**v0.4.22**，决策点全部定案；#2 锁策略 / #5 目录锁于 v0.4.17 修订；v0.4.22 修 Windows 产物缺渲染层） |
+| 方案设计 | ✅ `docs/架构设计方案.md`（**v0.4.24**，决策点全部定案；#2 锁策略 / #5 目录锁于 v0.4.17 修订；v0.4.22 修 Windows 产物缺渲染层；v0.4.24 配置自动探测 + 未知项不再静默忽略 + LDAP 支持 AD objectGUID） |
 | M0 服务端骨架 | ✅ 完成：schema 迁移、BlobStore（zstd auto）、Path-History 核心（Tombstone / restore / HEAD 快路径 / manifest_hash 异步）、可启动空服务端 |
 | M1 核心链路（认证 + 建仓 + 分块上传 + 两阶段提交 + 浏览查询） | ✅ 完成：本地/LDAP 认证、会话、登录限流、`--create-admin`、仓库管理、整块/分块上传、下载（Range/HEAD/zstd 流式解压）、两阶段提交（幂等重放/OUT_OF_DATE）、tree/log/changes/info；单测 26 + 集成测试 5 + 冒烟 34 全绿 |
 | M1.5 压测 | ✅ 完成：造数脚本（`xs` 1k → `full` **1M 文件 / 100k 修订**）、进程内 axum 压测 harness、四档实测。**结论：Path-History 两条核心查询在 `full` 档不可用**（`list_dir_at_root_head` 86.9 s、`tree?rev=` 端到端 75.5 s、`apply_commit_1000` 267.8 s），定位 6 个瓶颈（B1 前缀 LIKE 未下推索引、B2 语句重复 prepare 为 P0 阻断项）。**上述三条已于 M1.6 修复**。见[压测报告](docs/压测报告-M1.5.md) |
@@ -240,6 +240,28 @@ node scripts/check_asar.mjs   # 单独跑 asar 门禁（自动找 client/release
 
 > 平台换代时，这类隐含假设**不会报错**——只会让腿起不来、或产物架构悄悄错位。
 > 所以架构要显式写进矩阵，别靠 runner 标签推导。
+
+### 服务端配置：为什么"改了配置却没生效"（v0.4.24）
+
+2026-10-09 一次性堵掉的三处静默失效，根因是同一个：**配置系统没有反馈手段**。
+
+- **不传 `--config` 就是全默认值，一个文件都不找。** 交付包把 `b-artifact.toml` 放在 exe 同目录、
+  README 又让用户"复制 example 改名"，但启动命令里根本没带 `--config` —— 配了等于没配，
+  服务端还不吭声。现在会自动探测 **exe 同目录 → CWD**，并在启动日志打印一行
+  `配置文件: 自动探测到 /path/to/b-artifact.toml`。**配置不生效先看这行。**
+- **写错的配置项被 serde 静默丢弃。** 文档示例里 LDAP 写成顶层 `[ldap]`（实际是
+  `[auth.ldap]`），加上结构体当时没有 `deny_unknown_fields`，那一整节被丢掉 →
+  LDAP 永远不启用、服务照常启动、零日志。现在未知项直接报错退出。
+- **交付物示例本身写着实现里不存在的字段名**（`compression = "zstd"`、`max_login_failures`、
+  `attr_uid`、`[lock]`/`[gc]` 整节）。现在示例已修正，且新增一条单测直接从 `build.yml`
+  提取 heredoc 交给 serde 解析 —— **示例和配置结构焊在一起**，写错会立刻在单测里红。
+
+Windows 上注册成服务 / 计划任务时进程 CWD 常是 `C:\Windows\System32`，所以 exe 同目录优先于CWD；
+也因此 `admin_dir` / `data_dir` 这类相对路径是相对 CWD 的，服务化部署请在配置里写绝对路径。
+
+启用 AD 域账号登录时注意两项必改：`user_filter = "(sAMAccountName={username})"`、
+`attr_unique_id = "objectGUID"`（AD 没有 `entryUUID`）。`objectGUID` 是二进制值，
+服务端自动按 hex 存储 —— 这是它能当 `external_id` 的前提。
 
 真跑一遍全链路（自建服务端 + 真实 Electron，143 项断言，含自动同步与刷新后勾选保持、树上增删、双击展开/收起、右键菜单、树上加锁/解锁/强制解锁、部分检出、冲突解决、历史下载与设置）：
 
