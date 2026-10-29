@@ -125,6 +125,8 @@ jobs:
       # macOS 没有 WebDriver，所以走应用内 `--self-check` 注入，三平台同一套。
       - name: Self-check packaged app
         shell: bash
+        # 防止"WebView 起不来但进程不退出"把 job 拖到 6 小时超时
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           BIN="client/src-tauri/target/${{ matrix.tauri_target }}/release/b-artifact-app"

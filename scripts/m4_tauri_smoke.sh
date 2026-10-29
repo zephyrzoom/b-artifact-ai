@@ -73,9 +73,8 @@ set -e
 echo "$SELF_CHECK_OUT" | sed 's/^/    /'
 case "$SELF_CHECK_RC" in
   0) ok "self-check 通过（前端已挂载且 IPC 通）" ;;
-  3) bad "self-check：前端没挂载或 IPC 不通（白屏/桥断了）" ;;
-  4) bad "self-check：注入的 JS 抛异常" ;;
-  5) bad "self-check 超时：前端完全没跑起来（多半白屏）" ;;
+  2) bad "self-check：15s 内拿不到 main 窗口" ;;
+  5) bad "self-check 超时：30s 内没通过（看上一行的诊断码：-1=JS 从未执行 3=未挂载 4=JS/IPC 抛异常）" ;;
   *) bad "self-check 异常退出（rc=$SELF_CHECK_RC）" ;;
 esac
 rm -rf "$B_ARTIFACT_HOME"

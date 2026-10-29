@@ -79,37 +79,70 @@ pub fn run() {
     if self_check {
         let handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(1800)).await;
-            let Some(w) = handle.get_webview_window("main") else {
-                eprintln!("[self-check] 找不到 main 窗口");
+            // 自检必须是**轮询**而不是"睡固定时间再打一枪"：
+            // 三平台 WebView 的就绪时机差很多（WKWebView 会把 eval 排队，WebView2 /
+            // WebKitGTK 在文档没好之前 eval 会直接报错，CI 冷启动更慢）。
+            // 第一版在 macOS 上一次过、在 linux/windows 上双双 exit 2 —— 就是这个问题。
+            let mut win = None;
+            for _ in 0..75 {
+                // 最多等 15s
+                if let Some(w) = handle.get_webview_window("main") {
+                    win = Some(w);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            let Some(w) = win else {
+                eprintln!("[self-check] 15s 内没有拿到 main 窗口，无法自检");
                 std::process::exit(2);
             };
             let _ = w.show();
+
             // 前端跑完这两件事才算通过：① 首屏已挂载 ② 一次 invoke 往返成功。
             // 结论通过 `selfcheck(code)` 命令回传 —— **不能靠 document.title 回传**：
             // WKWebView 的 document.title 不会同步到 Tauri 的窗口标题（实测）。
+            // 每次都重新注入：可能落在导航完成之前的旧文档里，那一枪就白打了。
             let js = r#"(async () => {
   const report = (code) => window.__TAURI_INTERNALS__.invoke('selfcheck', { code });
   try {
-    const r = await window.__TAURI_INTERNALS__.invoke('ipc', { channel: 'app:info', payload: null });
     const root = document.querySelector('#app');
-    const mounted = !!root && root.children.length > 0;
-    await report((r && r.ok && mounted) ? 0 : 3);
-  } catch (e) { await report(4); }
+    if (document.readyState === 'loading' || !root || root.children.length === 0) {
+      await report(3);   // 诊断：页面还没挂载，等下一次注入
+      return;
+    }
+    const r = await window.__TAURI_INTERNALS__.invoke('ipc', { channel: 'app:info', payload: null });
+    if (r && r.ok) await report(0);   // 只有这一步才算通过
+  } catch (e) { await report(4); }    // 诊断：JS/IPC 抛异常，同样继续重试
 })();"#;
-            if let Err(e) = w.eval(js) {
-                eprintln!("[self-check] 注入失败：{e}");
-                std::process::exit(2);
-            }
-            for _ in 0..60 {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            let mut eval_errors = 0usize;
+            let mut last_error = String::new();
+            for attempt in 0..60 {
+                // 最多 30s：CI 冷启动 + 首次加载 1 MB 前端
                 let code = commands::SELF_CHECK_CODE.load(std::sync::atomic::Ordering::SeqCst);
-                if code != -1 {
-                    eprintln!("[self-check] 结论码={code}（0=通过 3=未挂载或 IPC 失败 4=JS 异常）");
-                    std::process::exit(if code == 0 { 0 } else { 1 });
+                if code == 0 {
+                    let diag = commands::SELF_CHECK_DIAG.load(std::sync::atomic::Ordering::SeqCst);
+                    eprintln!(
+                        "[self-check] 通过（第 {attempt} 次注入后；期间诊断码={diag}，-1=无 3=曾未挂载 4=曾抛异常）"
+                    );
+                    std::process::exit(0);
                 }
+                match w.eval(js) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        eval_errors += 1;
+                        last_error = e.to_string();
+                        if attempt % 10 == 0 {
+                            eprintln!("[self-check] 第 {attempt} 次注入失败（{eval_errors} 次累计）：{e}");
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
-            eprintln!("[self-check] 超时：前端没有回传结论（多半是白屏，JS 没跑起来）");
+            let diag = commands::SELF_CHECK_DIAG.load(std::sync::atomic::Ordering::SeqCst);
+            eprintln!(
+                "[self-check] 30s 内没通过：注入失败 {eval_errors} 次（最后一次：{last_error}），诊断码={diag}（-1=JS 从未执行 3=页面在但未挂载 4=JS/IPC 抛异常）"
+            );
             std::process::exit(5);
         });
     }

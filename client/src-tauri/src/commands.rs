@@ -88,14 +88,23 @@ pub async fn ipc(
     Ok(dispatch(state.inner(), &channel, payload.as_ref()).await)
 }
 
-/// 打包自检的回传位：前端跑完自检脚本后调 `selfcheck(code)` 把结论送回来。
-/// -1 = 还没收到（说明 JS 根本没跑起来，通常意味着白屏）；0 = 通过；其余见前端脚本。
+/// 打包自检的**成功**回传位：只有 `code == 0` 会落在这里（0 = 首屏已挂载且 IPC 往返成功）。
 pub static SELF_CHECK_CODE: AtomicI32 = AtomicI32::new(-1);
+
+/// 自检的**诊断**位（3 = 页面在但没挂载、4 = JS/IPC 抛异常）。
+///
+/// 分开存的原因：诊断码是"此刻还没好"，不是"最终失败"——CI 冷启动时页面刚解析完、
+/// Vue 还没挂载就先报一次 3 是常态。早期版本拿它直接判失败，linux/windows 两条腿双双假红。
+pub static SELF_CHECK_DIAG: AtomicI32 = AtomicI32::new(-1);
 
 /// 只在 `--self-check` 流程里被前端调用（正常界面不会碰）。
 #[tauri::command]
 pub fn selfcheck(code: i32) {
-    SELF_CHECK_CODE.store(code, Ordering::SeqCst);
+    if code == 0 {
+        SELF_CHECK_CODE.store(0, Ordering::SeqCst);
+    } else {
+        SELF_CHECK_DIAG.store(code, Ordering::SeqCst);
+    }
 }
 
 /// 处理一次调用：校验 → 执行 → 包信封。**不 panic、不抛异常**。
