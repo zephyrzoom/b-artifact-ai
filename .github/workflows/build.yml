@@ -10,10 +10,15 @@ name: Build & Package
 # 平台哪天再迁一次，产物架构不会跟着静默错位。
 on:
   push:
-    branches: [main]
+    # `tauri` 是 v0.5.0 的迁移分支：不放开它，推上去**一个 run 都不会有**
+    # （2026-10-29 就是这样踩了一次——分支过滤比任何构建错误都更安静）。
+    # 合并进 main 之后把 tauri 从列表里删掉。
+    branches: [main, tauri]
     tags: ['v*']
   pull_request:
     branches: [main]
+  # 手动触发：Actions 页 → Build & Package → Run workflow（选分支即可）
+  workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
@@ -34,20 +39,26 @@ jobs:
             target_os: linux
             arch: x64
             tauri_target: x86_64-unknown-linux-gnu
+            # `bundle.targets` 里只剩 `app`（macOS 专属）。linux/win 本来只分发裸二进制，
+            # 传 --no-bundle 既快又不会撞 "target `app` not supported on this platform"。
+            bundle_flag: --no-bundle
             ext: ""
           - os: windows-latest
             target_os: windows
             arch: x64
             tauri_target: x86_64-pc-windows-msvc
+            bundle_flag: --no-bundle
             ext: ".exe"
           # macos-latest = macOS 26，**Apple Silicon（arm64）**。
           # 原先这里是 macos-13（Intel x64），而该镜像已于 2025-12-04 完全退役、标签已不存在，
           # 这条腿实际上已经起不来 runner。现按最新系统重建，产物随之改为 arm64
-          # （与 client/electron-builder.yml 的 mac 段一致）。
+          # （产物架构与 client/src-tauri/tauri.conf.json 的 bundle 段一致）。
           - os: macos-latest
             target_os: macos
             arch: arm64
             tauri_target: aarch64-apple-darwin
+            # macOS 要 .app 包（目标在 tauri.conf.json 里固定为 app）
+            bundle_flag: ""
             ext: ""
 
     steps:
@@ -107,7 +118,7 @@ jobs:
 
       - name: Package client (${{ matrix.target_os }}-${{ matrix.arch }})
         working-directory: client
-        run: npx tauri build --target ${{ matrix.tauri_target }}
+        run: npx tauri build --target ${{ matrix.tauri_target }} ${{ matrix.bundle_flag }}
 
       # 打包门禁（替代 Electron 时代的 asar 校验 + CDP 冒烟）：
       # 真把打包产物跑一遍，断言"首屏已挂载 + 一次 IPC 往返成功"。
@@ -121,7 +132,9 @@ jobs:
           if [ ! -f "$BIN" ]; then echo "缺少打包产物：$BIN"; exit 1; fi
           export B_ARTIFACT_HOME="$(mktemp -d)"
           if [ "${{ matrix.target_os }}" = "linux" ]; then
-            xvfb-run -a "$BIN" --self-check
+            # xvfb 里没有 GPU 合成器：不关掉 WebKitGTK 的 DMABUF 渲染会直接白屏
+            WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 \
+              xvfb-run -a "$BIN" --self-check
           else
             "$BIN" --self-check
           fi
@@ -243,6 +256,20 @@ jobs:
               tar -czf "upload/client/b-artifact-$OS-$ARCH.tar.gz" -C "$REL" b-artifact-app
               ;;
           esac
+          # 产物体积兜底：**打包器不校验"应用能不能起来"，更不校验"有没有东西"**。
+          # 曾经用 if-no-files-found: warn 让"缺渲染层"的包一路绿灯到用户双击。
+          # 这里对一个必然 10 MB 级的二进制做下限断言，异常小就当场红。
+          found=0
+          for f in upload/client/*; do
+            [ -f "$f" ] || continue
+            found=1
+            sz=$(wc -c < "$f")
+            echo "  $(basename "$f") = $sz bytes"
+            if [ "$sz" -lt 1000000 ]; then
+              echo "客户端产物异常小（$sz bytes）：$f"; exit 1
+            fi
+          done
+          if [ "$found" -eq 0 ]; then echo "没有产出任何客户端交付物"; exit 1; fi
           echo "=== upload/ 内容 ==="
           ls -R upload
 
