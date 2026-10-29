@@ -69,8 +69,14 @@ for _ in $(seq 1 60); do
 done
 check "GET /health" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health")"
 
-# CLI：node 直驱 tsx，stderr 单独收（Node 的 SQLite ExperimentalWarning 不干扰断言）
-CLI=( "$NODE" "$ROOT/client/node_modules/.bin/tsx" "$ROOT/client/src/cli.ts" )
+# CLI：Rust 二进制（v0.5.0 起客户端引擎已从 TS 迁到 Rust，见 docs/客户端Tauri迁移方案.md）
+CLIENT_BIN="$ROOT/client/src-tauri/target/debug/b-artifact"
+if [ ! -x "$CLIENT_BIN" ]; then
+  echo "  编译客户端 CLI（首次约 2 分钟）…"
+  (cd "$ROOT/client/src-tauri" && "$CARGO" build --quiet) || { echo "客户端编译失败"; exit 1; }
+fi
+[ -x "$CLIENT_BIN" ] && ok "客户端 CLI 二进制就绪" || { echo "缺少 $CLIENT_BIN"; exit 1; }
+CLI=( "$CLIENT_BIN" )
 # 原始 JSON 一并落盘，断言失败时能立刻看到 CLI 到底返回了什么
 cli() { "${CLI[@]}" "$@" 2>>"$WORK/cli.err" | tee -a "$WORK/cli.log"; }
 
@@ -238,7 +244,7 @@ check "强制解锁后无锁" "0" "$(echo "$R" | jq_get 'len(d["items"])')"
 # ---- 11. 边界 ----
 echo "== 11. 边界与错误处理 =="
 mkdir -p "$WORK/outside"
-R=$(cd "$WORK/outside" && "$NODE" "$ROOT/client/node_modules/.bin/tsx" "$ROOT/client/src/cli.ts" status --json 2>/dev/null)
+R=$(cd "$WORK/outside" && "${CLI[@]}" status --json 2>/dev/null)
 case "$R" in *"不在工作副本"*) ok "工作副本外执行 status 报错";; *) bad "工作副本外应报错，实际：$R";; esac
 R=$(cli lock --dir wc-a ../escape.psd --json)
 # 注意：bash 3.2（macOS 自带）不把多字节字符当变量名终止符，`$R）` 会被当成变量名的一部分，

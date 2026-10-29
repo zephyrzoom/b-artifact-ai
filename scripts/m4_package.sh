@@ -1,125 +1,101 @@
 #!/bin/bash
-# b-artifact 客户端打包门禁（§14 的 M4 交付物：Electron 可运行包）
+# b-artifact 客户端打包门禁（v0.5.0：Tauri 2 + Rust）
 #
-# 三件事一次做完：
-#   ① 构建（主进程 / preload / 渲染层）+ 生成图标；
-#   ② electron-builder 出 `.app` 与 dmg / zip 安装包；
-#   ③ **拿打包产物跑一遍完整的 Electron 冒烟**（同一套 143 项断言）。
+# 四件事一条链路：
+#   ① 构建渲染层（vite → dist/renderer，随后被编译期内嵌进二进制）；
+#   ② `tauri build` 出 `.app` 与 `.dmg`；
+#   ③ **拿打包产物自检**：首屏挂载 + 一次 IPC 往返（`--self-check`）；
+#   ④ 体积门禁：超出预算直接失败（防"无声退化回大包"）。
 #
-# 为什么 ③ 是必须的：asar 打包会改变文件布局——preload 路径、渲染层的相对资源路径、
-# `__dirname` 推导的 CLIENT_ROOT 全都可能失效。只跑源码树里的冒烟是发现不了的
-# （本项目已经栽过两次"组件单测/开发模式全绿、真机上不对"）。
+# 为什么 ③ 必须用打包产物：内嵌资源、协议、CSP、二进制名全都只在打包后成立。
+# Electron 时代这条链路上栽过两次（"开发模式全绿、真机上白屏"）。
 #
 # 用法：
-#   scripts/m4_package.sh                 # .app + zip，并跑打包产物冒烟
-#   PORT=18401 scripts/m4_package.sh
-#   SKIP_SMOKE=1 scripts/m4_package.sh    # 只打包不验证（不推荐）
+#   scripts/m4_package.sh
+#   SKIP_SMOKE=1 scripts/m4_package.sh     # 只打包不验证（不推荐）
 #
-# 环境变量：PORT(默认18402) / NODE / CARGO / SKIP_SMOKE / KEEP
+# 环境变量：CARGO / SKIP_SMOKE / KEEP
 #
-# 关于 dmg：默认不出（`electron-builder.yml` 里写明了原因）——
-# 它需要额外下载 dmgbuild 工具包，而那个 host 在本沙箱完全不可达。要出就在联网环境
-# 给 mac.target 加上 dmg。
+# **交付形态是 zip（不是 dmg）**：`tauri.conf.json` 的 `bundle.targets` 只留 `app`。
+# 原因不是偷懒：tauri-bundler 的 `bundle_dmg.sh` 在本机（macOS 13 / BSD grep）上，
+# 用 `grep` 匹配挂载设备名时报 `brackets ([ ]) not balanced`，最终
+# `unable to proceed with final disk image creation`（真跑过，不是猜的）。
+# zip 是 macOS 上合法的分发形态（解压后拖进「应用程序」即可），与 Electron 时代一致。
+#
+# 体积预算（实测基线见 docs/架构设计方案.md §6.4）：
+#   zip ≤ 20 MB、.app（目录）≤ 40 MB —— 超了就是又塞了不该塞的东西。
 
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORT="${PORT:-18402}"
-NODE="${NODE:-node}"
-CARGO="${CARGO:-cargo}"
 CLIENT="$ROOT/client"
-BIN="$ROOT/server/target/debug/b-artifact-server"
+BUNDLE="$CLIENT/src-tauri/target/release/bundle"
+APP="$BUNDLE/macos/b-artifact.app"
+APP_BIN="$APP/Contents/MacOS/b-artifact-app"
+ZIP_MAX_MB=20
+APP_MAX_MB=40
 
-# electron-builder 的 mac 产物目录名带架构后缀：Intel 是 release/mac，
-# Apple Silicon 是 release/mac-arm64。原先这里写死 release/mac，在 ARM 机器上
-# 会误报「打包产物缺失」（v0.4.23）。
-case "$(uname -m)" in
-  arm64 | aarch64) APP_DIR="mac-arm64" ;;
-  *) APP_DIR="mac" ;;
-esac
-APP="$CLIENT/release/$APP_DIR/b-artifact.app"
-APP_BIN="$APP/Contents/MacOS/b-artifact"
-
-ADMIN="pkguser"
-PASS="smoke-PW-123456"
-BASE="http://127.0.0.1:$PORT"
+PASS_N=0
+FAIL_N=0
+ok()  { PASS_N=$((PASS_N + 1)); echo "  ✓ $1"; }
+bad() { FAIL_N=$((FAIL_N + 1)); echo "  ✗ $1"; }
 
 WORK=$(mktemp -d /tmp/b-artifact-pkg.XXXXXX)
 if [ "${KEEP:-0}" = "1" ]; then
-  trap 'kill "$SERVER_PID" 2>/dev/null; echo "工作目录保留：$WORK"' EXIT
+  trap 'echo "工作目录保留：$WORK"' EXIT
 else
-  trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
+  trap 'rm -rf "$WORK"' EXIT
 fi
-SERVER_PID=""
-SHOTS="$WORK/shots"
 
-echo "== 1. 构建客户端 =="
+echo "== 1. 构建渲染层 =="
 if [ ! -d "$CLIENT/node_modules" ]; then
-  (cd "$CLIENT" && npm install --no-audit --no-fund) || { echo "npm install 失败"; exit 1; }
+  (cd "$CLIENT" && npm ci --no-audit --no-fund) || { echo "npm ci 失败"; exit 1; }
 fi
-(cd "$CLIENT" && npm run build > "$WORK/build.log" 2>&1 && npm run icon >> "$WORK/build.log" 2>&1) \
+(cd "$CLIENT" && npm run build > "$WORK/build.log" 2>&1) \
   || { echo "构建失败："; tail -20 "$WORK/build.log"; exit 1; }
-[ -f "$CLIENT/build/icon.png" ] || { echo "缺少图标 $CLIENT/build/icon.png"; exit 1; }
-echo "  ✓ dist/（main + preload + renderer）与 build/icon.png"
+[ -f "$CLIENT/dist/renderer/index.html" ] && ok "dist/renderer/index.html" \
+  || { echo "缺少渲染层入口"; exit 1; }
 
-echo "== 2. electron-builder 打包 =="
-# Electron 分发用本地离线落位的（setup_electron.sh 解压到 node_modules/electron/dist）；
-# 共享配置里不写 electronDist，CI（有网）由 electron-builder 自行下载。
-(cd "$CLIENT" && npx electron-builder --config.electronDist=node_modules/electron/dist > "$WORK/pack.log" 2>&1) \
-  || { echo "打包失败："; tail -30 "$WORK/pack.log"; exit 1; }
-[ -x "$APP_BIN" ] || { echo "打包产物缺失：$APP_BIN"; tail -20 "$WORK/pack.log"; exit 1; }
-echo "  ✓ ${APP}（$(du -sh "$APP" | cut -f1)）"
-echo "  ✓ asar $(du -h "$APP/Contents/Resources/app.asar" | cut -f1)（应只含 dist/ 与 package.json）"
-
-# 门禁：asar 必须含渲染层入口。打包器只按 `files` 收集，不校验应用能不能起得来——
-# 缺 index.html 的包会一路绿灯到用户双击才炸（Windows CI 腿真实踩过）。
-NODE "$ROOT/scripts/check_asar.mjs" "$APP/Contents/Resources/app.asar" \
-  || { echo "asar 门禁未通过：打包产物缺必需文件"; exit 1; }
-
-ARTIFACTS=$(ls "$CLIENT/release"/*.dmg "$CLIENT/release"/*.zip 2>/dev/null)
-if [ -n "$ARTIFACTS" ]; then
-  echo "$ARTIFACTS" | while read -r f; do echo "  ✓ $(basename "$f") $(du -h "$f" | cut -f1)"; done
-fi
-
-if [ "${SKIP_SMOKE:-0}" = "1" ]; then
-  echo "== 3. 跳过冒烟（SKIP_SMOKE=1）=="
-  echo "---- 产物在 $CLIENT/release ----"
-  exit 0
-fi
-
-echo "== 3. 启动服务端（供打包产物冒烟用）=="
-if [ ! -x "$BIN" ]; then
-  (cd "$ROOT/server" && "$CARGO" build --quiet) || { echo "编译失败"; exit 1; }
-fi
-printf '%s\n%s\n' "$PASS" "$PASS" | "$BIN" --data-dir "$WORK/data" --create-admin "$ADMIN" > "$WORK/create-admin.log" 2>&1
-grep -qi "error\|失败" "$WORK/create-admin.log" && { echo "建管理员失败："; cat "$WORK/create-admin.log"; exit 1; }
-
-"$BIN" --data-dir "$WORK/data" --listen "127.0.0.1:$PORT" > "$WORK/server.log" 2>&1 &
-SERVER_PID=$!
-for _ in $(seq 1 60); do
-  if [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health" 2>/dev/null)" = "200" ]; then break; fi
-  sleep 0.5
-done
-[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health")" = "200" ] \
-  || { echo "服务端未就绪："; tail -20 "$WORK/server.log"; exit 1; }
-echo "  ✓ GET /health 200"
-
-echo "== 4. 用【打包产物】跑冒烟 =="
-mkdir -p "$SHOTS"
-set +e
-# 注意不传 --app：打包产物自带 app 目录
-"$NODE" "$ROOT/scripts/electron_smoke.mjs" \
-  --base "$BASE" --user "$ADMIN" --password "$PASS" \
-  --electron "$APP_BIN" --work "$WORK" --shots "$SHOTS"
-RC=$?
-set -e
-
-if [ "$RC" -ne 0 ]; then
-  echo "服务端日志尾部："; tail -10 "$WORK/server.log"
-  echo "（打包日志见 $WORK/pack.log）"
-  [ "${KEEP:-0}" = "1" ] || echo "（用 KEEP=1 重跑可保留工作目录与截图）"
+echo "== 2. tauri build（.app + zip） =="
+(cd "$CLIENT" && npx tauri build > "$WORK/pack.log" 2>&1) \
+  || { echo "打包失败："; tail -40 "$WORK/pack.log"; exit 1; }
+[ -x "$APP_BIN" ] && ok "生成的 .app 可执行文件" || bad "缺少 $APP_BIN"
+# 打 zip（ditto 保留 .app 的符号链接与权限；zip -r 会破坏 bundle 结构）
+ZIP="$BUNDLE/b-artifact_0.5.0_$(uname -m).zip"
+rm -f "$ZIP"
+if ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP" 2>"$WORK/zip.log"; then
+  ok "生成的 zip（$(basename "$ZIP")）"
 else
-  echo "截图：$SHOTS"
-  echo "---- 安装包在 $CLIENT/release ----"
+  bad "zip 打包失败（见 $WORK/zip.log）"
 fi
-exit "$RC"
+
+echo "== 3. 打包产物自检 =="
+if [ "${SKIP_SMOKE:-0}" = "1" ]; then
+  echo "  - 跳过（SKIP_SMOKE=1）"
+else
+  export B_ARTIFACT_HOME="$WORK/home"
+  set +e
+  OUT=$("$APP_BIN" --self-check 2>&1)
+  RC=$?
+  set -e
+  echo "$OUT" | sed 's/^/    /'
+  case "$RC" in
+    0) ok "self-check 通过（首屏挂载 + IPC 双向）" ;;
+    *) bad "self-check 失败（rc=${RC}）" ;;
+  esac
+fi
+
+echo "== 4. 体积门禁 =="
+APP_MB=$(du -sm "$APP" 2>/dev/null | cut -f1)
+echo "    .app = ${APP_MB:-?} MB（预算 ${APP_MAX_MB}）/ 二进制 $(ls -l "$APP_BIN" | awk '{printf "%.1f", $5/1048576}') MB"
+[ "${APP_MB:-999}" -le "$APP_MAX_MB" ] && ok ".app 体积在预算内" \
+  || bad ".app 体积超预算（${APP_MB:-?} MB > $APP_MAX_MB MB）"
+if [ -f "${ZIP:-}" ]; then
+  ZIP_MB=$(( $(stat -f%z "$ZIP") / 1048576 ))
+  echo "    zip = $ZIP_MB MB（预算 ${ZIP_MAX_MB}）"
+  [ "$ZIP_MB" -le "$ZIP_MAX_MB" ] && ok "zip 体积在预算内" \
+    || bad "zip 体积超预算（$ZIP_MB MB > $ZIP_MAX_MB MB）"
+fi
+
+echo "---- 结果：${PASS_N} 通过 / ${FAIL_N} 失败 ----"
+[ "$FAIL_N" -eq 0 ] || exit 1

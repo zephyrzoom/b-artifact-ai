@@ -4,7 +4,7 @@
 
 - 服务端：Rust（axum + SQLite + 内容寻址 blob 存储）
 - 管理端：Vue 3（由服务端静态托管）
-- 客户端：Electron（工作副本目录树、目录级部分检出、文件锁 + 先锁后提交）
+- 客户端：Tauri 2 + Rust（工作副本目录树、目录级部分检出、文件锁 + 先锁后提交）
 
 ## 当前状态
 
@@ -142,192 +142,98 @@ npm run test:cov  # 覆盖率：utils 与 stores 100%、api 97%、组件 92%（�
 - 权限矩阵 / 预览器 / purge 的判定逻辑抽在 `src/utils/{acl,dirs,purge}.ts`，组件只负责渲染——
   要改这些规则先改纯函数、再跑 `npm test`。
 
-## 客户端桌面应用（M4 第三阶段）
+## 客户端桌面应用（v0.5.0：Tauri 2 + Rust）
 
-主进程 / preload / 渲染层三层，`npm run build` 一次出三份产物：
-
-```bash
-cd client
-npm install
-# Electron 二进制的 npm postinstall 常被沙箱拦，用离线落位脚本补齐（纯下载，可重复执行）
-../scripts/setup_electron.sh
-npm run build      # dist/main（ESM） + dist/preload（**CJS**） + dist/renderer（Vue）
-npm start          # 启动应用（脚本会清掉宿主注入的 ELECTRON_RUN_AS_NODE）
-npm test           # Vitest：558 项（引擎 + shared/main/preload/renderer）
-npm run typecheck  # tsc + vue-tsc 两份检查
-```
-
-- 开发期渲染层可走 Vite dev server：`npm run dev:renderer`，然后
-  `B_ARTIFACT_DEV_URL=http://127.0.0.1:5273 npm start`。
-- **`ELECTRON_RUN_AS_NODE` 必须清掉**：WorkBuddy 等 Electron 宿主会把它注入子进程，
-  带着它 Electron 会退化成纯 Node（`--version` 打 Node 版本、窗口永不出现）。
-  `npm start` 已经处理；手工跑二进制时记得 `env -u ELECTRON_RUN_AS_NODE`。
-- 渲染层不碰 token、不发网络请求：一切都从 `window.bartifact` 过 preload，
-  主进程按 `src/shared/channels.ts` 的白名单 + schema 校验后才落到引擎。
-
-### 打包（出可分发产物）
+**v0.5.0 把桌面壳从 Electron 换成了 Tauri 2，引擎整体移植到 Rust**（`client/src-tauri/`）。
+渲染层（Vue 3 + Element Plus）没有重写：只把 `window.bartifact` 那层桥换成了
+`invoke('ipc', { channel, payload })`，34 个通道名与 payload schema、错误码、`wc.db`
+磁盘格式、CLI 的 `--json` 形状全部保持不变。方案与逐模块映射见
+[`docs/客户端Tauri迁移方案.md`](docs/客户端Tauri迁移方案.md)。
 
 ```bash
 cd client
-npm run icon        # 生成 build/icon.png（1024×1024，零依赖手写 PNG 编码器）
-npm run dist        # = build + icon + electron-builder → release/
-npm run dist:dir    # 只出 .app（不压缩，快）
+
+npm ci
+npm run build        # vite → dist/renderer（编译期内嵌进二进制，没有 asar / preload）
+npm run app:dev      # tauri dev：起窗口 + HMR（需要先 `npm run dev` 提供 5273 端口）
+npm run dist         # tauri build：出 .app 与 zip
 ```
 
-产物在 `client/release/`：
-
-| 产物 | 大小 | 说明 |
+| 产物 | 体积（实测） | 说明 |
 |---|---|---|
-| `mac/b-artifact.app` | ~307 MB | 可直接双击运行（绝大部分是 Electron Framework） |
-| `b-artifact-0.1.0-mac.zip` | ~126 MB | 分发用：解压后拖进「应用程序」 |
-| `Contents/Resources/app.asar` | **1.5 MB** | 只含 `dist/`（main/preload/renderer）与 `package.json` |
+| `src-tauri/target/release/b-artifact-app` | **10.3 MB** | 单二进制，前端已内嵌 |
+| `bundle/macos/b-artifact.app` | **17 MB** | 含 CLI 二进制的完整 app 包 |
+| `bundle/macos/../*.zip` | **7 MB** | 分发用（`ditto` 打包，保住 bundle 结构） |
 
-> `.app` 所在目录名跟架构走：Intel 是 `release/mac`，Apple Silicon 是 `release/mac-arm64`。
-> `npm run dist` 不写死架构，跟随本机；CI 则由 `build.yml` 矩阵的 `arch` 字段显式指定。
+对比同一台机器上 Electron 时代的产物：`.app` 301 MB、zip 119 MB —— **zip 小了一个量级**，
+而且不再随包带 Node 运行时。
 
-```bash
-scripts/m4_package.sh    # 打包门禁：构建 → 打包 → 校验 asar → 用打包产物跑同一套 143 项冒烟
-node scripts/check_asar.mjs   # 单独跑 asar 门禁（自动找 client/release 下的 app.asar）
-```
+### 为什么是 zip 而不是 dmg
+`tauri.conf.json` 的 `bundle.targets` 只留 `app`。不是偷懒：tauri-bundler 的
+`bundle_dmg.sh` 在 macOS 13 的 BSD grep 上匹配挂载设备名时报
+`brackets ([ ]) not balanced`，最终 `unable to proceed with final disk image creation`
+（真跑过）。zip 是 macOS 上合法的分发形态，与 Electron 时代一致；要 dmg 就在更新的
+macOS 上把 `dmg` 加回 `targets`。
 
-三条要注意的：
+### 安全基线（与 Electron 时代等价）
+- 渲染层**只**能调白名单里的通道，越界直接回 `FORBIDDEN` 信封；Rust 侧再按通道 schema 校验一遍；
+- token 只存在 Rust 侧（钥匙串），渲染层拿不到，也没有任意 `fs` / `shell` / `dialog` 权限
+  （`capabilities/default.json` 只给 `core:default`）；
+- CSP 保留（`default-src 'self'` + `script-src 'self'` + `connect-src ipc:`），Tauri 会把自己的
+  注入脚本按 hash 加进策略；
+- 窗口先隐藏、页面就绪再显示；另加 1.2s 兜底显示 —— **页面加载失败时 on_page_load 不会来**，
+  没有兜底用户就看到"应用启动了却没有窗口"。
 
-- **`dependencies` 是空的**。渲染层已被 Vite 预打包进 `dist/renderer`，主进程只依赖 `electron`
-  与 Node 内置模块——运行时不从 `node_modules` 取任何东西。所以 Vue / Element Plus / Pinia
-  全在 `devDependencies`，asar 因此只有 1.5 MB。将来真加了运行时依赖，
-  `files: ['!node_modules/**']` 会让它缺席——**打包产物冒烟会立刻暴露**。
-- **打包器不校验应用能不能起得来**：它只按 `files` 收集文件，一份构建到一半的 `dist/`
-  （例如渲染层那步失败，只剩 main + preload）会被顺顺利利打包上传，直到用户双击才看到
-  「渲染层尚未构建」。`scripts/check_asar.mjs` 就是补这个洞的——断言 asar 里
-  `dist/main/index.js` / `dist/preload/index.cjs` / `dist/renderer/index.html` 三项齐全，
-  缺任一退出非 0。CI 三平台打包后都跑，本地 `m4_package.sh` 也跑。零依赖（直接读 asar 的
-  pickle 头解析文件树，不 spawn `npx asar`——那在三平台上可执行文件名各不相同，又是一个
-  Windows 陷阱）。
-- **产物未做代码签名与公证**（沙箱里没有 Developer ID 证书）。本机可直接运行；
-  分发给别人时对方需要右键「打开」绕过 Gatekeeper，正式对外发布要补签名 + 公证。
-  `dmg` 目标同理暂时没出（它要额外下载工具包，见 `client/electron-builder.yml` 的注释）。
+### 测试与门禁（分层，Electron 时代的 143 项 CDP 断言随框架退役）
 
-### 跨平台打包的两个 Windows 陷阱
+| 层 | 命令 | 规模 |
+|---|---|---|
+| 引擎 / 命令层 | `cd client/src-tauri && cargo test` | 163 项（含 checkout/commit/update/冲突/锁） |
+| 渲染层 | `cd client && npm test` | 201 项（与迁移前完全一致） |
+| 端到端生命周期 | `scripts/m4_smoke.sh` | 69 组断言（Rust CLI 打真服务端：登录→检出→提交→更新→冲突→删除→锁） |
+| 真实应用 | `scripts/m4_tauri_smoke.sh` | release 二进制 + `--self-check`（首屏挂载 + 一次 IPC 往返） |
+| 打包门禁 | `scripts/m4_package.sh` | 打包 → 用打包产物跑 self-check → 体积预算 |
 
-2026-10-09 修掉的两条，都是「CI 绿灯 → 用户双击 exe 才炸」的典型：
+> macOS 没有 WebDriver（`tauri-driver` 只支持 Linux/Windows），所以真实应用这一层改成
+> 应用内 `--self-check`：Rust 往 webview 注入 JS，断言"`#app` 已挂载 + `invoke('ipc', …)`
+> 往返成功"，结论通过 `selfcheck(code)` 命令回传。它恰好覆盖白屏与 IPC 不通这两类
+> 打包事故，三平台同一套，比 CDP driver 更省事。
 
-1. **不要 spawn `node_modules/.bin/*`**。那是给 `sh` 用的**无扩展名**脚本；Windows 上
-   `npm ci` 生成的是 `vite` / `vite.cmd` / `vite.ps1`，只有 `.cmd` 能跑，而 `spawnSync`
-   不带 `shell: true` 时既跑不了无扩展名的、跑 `.cmd` 又会被 Node ≥18.20.2/20.12.2/22
-   直接 EINVAL（CVE-2024-27980 的修复）。**一律用 `process.execPath` + 包的 JS 入口**
-   （`client/scripts/build.mjs` 现在跑的是 `node_modules/vite/bin/vite.js`）。
-2. **一条 CI step 里不要串多条命令**。pwsh 的 `$ErrorActionPreference='Stop'` **不拦原生命令
-   的非零退出**，GitHub 也只在脚本末尾查一次 `$LASTEXITCODE`——前一条挂了、后一条成功，
-   整个步骤就是绿的。当时正是 `npm run build` 挂了被 `npm run icon` 盖成 0，electron-builder
-   顺手把缺渲染层的半成品打进了 exe。`build.yml` 现在每条 npm 命令各占一个 step。
+## 客户端 CLI
 
-> 加任何门禁都要**先验一次它能不能失败**，否则写出来的只是一段永远绿的代码。
-
-### 跨平台打包的平台换代陷阱（macOS）
-
-2026-10-09 修掉的一条：**CI 的 mac 腿写的 `macos-13` 其实早已失效**。
-
-- `macos-13` 镜像 **2025-12-04 完全退役**，runner 标签不存在了 —— 那条腿不是"版本旧"，是**起不来**。
-- `macos-latest` 已于 **2026-06-15** 从 macOS 15 迁到 **macOS 26**，底层机器同时
-  从 Intel 换成 **Apple Silicon**。于是「macOS ⇒ x64」这个写在注释和配置里的
-  隐含假设**彻底不成立**。
-- 现在定为**全链路 arm64**：矩阵新增 `arch` 字段，`electron-builder --${{ matrix.arch }}`
-  取代写死的 `--x64`；`client/electron-builder.yml` 的 `mac.target` 去掉 `arch: [x64]`
-  （留空 = 跟随构建机，否则与 CI 传入值静默打架）；后端归档名带架构
-  （`b-artifact-server-macos-arm64.tar.gz`，因为 Rust 二进制是跟着 runner 原生编译的）。
-- **代价**：不再覆盖 Intel Mac（需 Rosetta 2）。要双架构就加一条
-  `macos-15-intel` + `arch: x64` 的矩阵腿（该镜像 2027-08 退役）。
-
-> 平台换代时，这类隐含假设**不会报错**——只会让腿起不来、或产物架构悄悄错位。
-> 所以架构要显式写进矩阵，别靠 runner 标签推导。
-
-### 服务端配置：为什么"改了配置却没生效"（v0.4.24）
-
-2026-10-09 一次性堵掉的三处静默失效，根因是同一个：**配置系统没有反馈手段**。
-
-- **不传 `--config` 就是全默认值，一个文件都不找。** 交付包把 `b-artifact.toml` 放在 exe 同目录、
-  README 又让用户"复制 example 改名"，但启动命令里根本没带 `--config` —— 配了等于没配，
-  服务端还不吭声。现在会自动探测 **exe 同目录 → CWD**，并在启动日志打印一行
-  `配置文件: 自动探测到 /path/to/b-artifact.toml`。**配置不生效先看这行。**
-- **写错的配置项被 serde 静默丢弃。** 文档示例里 LDAP 写成顶层 `[ldap]`（实际是
-  `[auth.ldap]`），加上结构体当时没有 `deny_unknown_fields`，那一整节被丢掉 →
-  LDAP 永远不启用、服务照常启动、零日志。现在未知项直接报错退出。
-- **交付物示例本身写着实现里不存在的字段名**（`compression = "zstd"`、`max_login_failures`、
-  `attr_uid`、`[lock]`/`[gc]` 整节）。现在示例已修正，且新增一条单测直接从 `build.yml`
-  提取 heredoc 交给 serde 解析 —— **示例和配置结构焊在一起**，写错会立刻在单测里红。
-
-Windows 上注册成服务 / 计划任务时进程 CWD 常是 `C:\Windows\System32`，所以 exe 同目录优先于CWD；
-也因此 `admin_dir` / `data_dir` 这类相对路径是相对 CWD 的，服务化部署请在配置里写绝对路径。
-
-启用 AD 域账号登录时注意两项必改：`user_filter = "(sAMAccountName={username})"`、
-`attr_unique_id = "objectGUID"`（AD 没有 `entryUUID`）。`objectGUID` 是二进制值，
-服务端自动按 hex 存储 —— 这是它能当 `external_id` 的前提。
-
-真跑一遍全链路（自建服务端 + 真实 Electron，143 项断言，含自动同步与刷新后勾选保持、树上增删、双击展开/收起、右键菜单、树上加锁/解锁/强制解锁、部分检出、冲突解决、历史下载与设置）：
+CLI 与桌面壳共用同一个 Rust 引擎（`client/src-tauri/src/cli.rs`，**不依赖 tauri**，
+服务器 / CI 上可直接跑）：
 
 ```bash
-scripts/m4_electron_smoke.sh       # KEEP=1 保留工作目录与截图
+cd client/src-tauri && cargo build --release
+./target/release/b-artifact --help
+
+./target/release/b-artifact login --server http://127.0.0.1:9000 --username admin --password '...' --json
+./target/release/b-artifact checkout --repo assets --dir ./wc --json
+./target/release/b-artifact status --dir ./wc --json
+./target/release/b-artifact add --dir ./wc characters/hero.psd --json
+./target/release/b-artifact commit --dir ./wc -m "init assets" --json
+./target/release/b-artifact lock --dir ./wc characters/hero.psd --json
 ```
 
-## 客户端 CLI（M4 第一轮）
+凭据落 `~/.b-artifact/auth.json`（0600，`B_ARTIFACT_HOME` 可重定向，测试与冒烟都靠它隔离）。
 
-引擎层是纯 TypeScript（`client/src/core`），CLI 直接复用它，Electron 主进程后续也复用同一套：
-
-```bash
-cd client
-npm install
-npm test            # Vitest：558 项（引擎 + shared/main/preload/renderer）
-npm run typecheck   # tsc --noEmit
-
-CLI="node node_modules/.bin/tsx src/cli.ts"
-$CLI login    --server http://127.0.0.1:8080 --username admin --password '***'
-$CLI repos
-$CLI checkout --repo art --dir ~/art [--sparse characters]   # 部分检出
-$CLI status
-$CLI add characters/hero.psd          # 会连带把无基线的父目录纳入版本控制
-$CLI commit -m "update hero"
-$CLI update
-$CLI lock characters/hero.psd -m "改贴图"
-$CLI unlock characters/hero.psd [--break --reason "人已离职"]
-```
-
-所有命令都支持 `--json`（结构化输出，供脚本断言）。凭据与全局 blob 缓存默认在
-`~/.b-artifact`，可用 `B_ARTIFACT_HOME` 整体重定向（冒烟脚本正是靠它隔离）。
-
-## 文档
-
-- [架构设计方案](docs/架构设计方案.md) —— 总体架构、数据模型、目录权限语义、锁模型、传输协议、管理端（§8）、测试方案（§12）、里程碑与风险
-- [M1.5 性能压测报告](docs/压测报告-M1.5.md) —— 四档实测（1k ~ 1M 文件）、6 个瓶颈清单与修复方向
-- [M1.6 性能修复报告](docs/压测报告-M1.6.md) —— B1/B2/B4/B5/B6 落地说明、xs/s/m 三档修复前后对比、B6 连接池调参结论
-- [M1.7 历史修订列目录报告](docs/压测报告-M1.7.md) —— 三个根因、差分验证方法、m 档实测（416×）、已知边界
-
-## 目录
+## 目录结构
 
 ```
-server/    Rust 服务端（axum + SQLite + 内容寻址 blob 存储）
-admin/     Vue 3 管理端（构建产物由服务端静态托管于 /admin）
-client/    客户端：src/core（引擎）+ cli.ts + src/main,preload,renderer（Electron 应用）
-scripts/   造数 / 压测 / 冒烟脚本
-docs/      方案与压测报告
+b-artifact/
+├─ server/                 Rust 服务端（axum + SQLite + blob 存储）
+├─ admin/                  Vue 3 管理端（构建产物由服务端 /admin/ 托管）
+├─ client/
+│  ├─ src-tauri/           Tauri 桌面壳 + Rust 引擎 + CLI
+│  │  ├─ src/engine/       api / db(wc.db) / wc / scan / paths / ignore / hash / pristine / revisions / text / cache
+│  │  ├─ src/channels.rs   34 个 IPC 通道 + schema（唯一事实源）
+│  │  ├─ src/commands.rs   单入口 ipc 命令：校验 → 分发 → 信封
+│  │  ├─ src/cli.rs        b-artifact CLI
+│  │  └─ src/{config,session,watch,state}.rs
+│  ├─ src/renderer/        Vue 3 渲染层（视图 / 组件 / store / 纯函数工具）
+│  ├─ src/shared/          跨边界的类型与通道名（渲染层用）
+│  └─ tests/renderer/      渲染层单测 201 项
+├─ scripts/                冒烟 / 端到端 / 打包门禁（见上表）
+└─ docs/                   架构设计方案 / Tauri 迁移方案 / 压测报告 / API 参考
 ```
-
-## 性能压测
-
-```bash
-# 一键跑全档位（造数 → 压测 → 原始 JSON 落到 bench-results/）
-scripts/m15_bench.sh --scales xs,s,m,full --iterations 25 --budget 12 --concurrency 8,32
-
-# 复用已有 fixture，只重跑压测
-scripts/m15_bench.sh --scales xs,s --reuse
-
-# 汇总表
-python3 scripts/m15_summary.py bench-results
-
-# 关键查询的 EXPLAIN QUERY PLAN 证据（含 B4 的 parent_path 方案验证）
-python3 scripts/plan_evidence.py --scale full --demo-parent
-
-# 修复前后对比表（两份 bench 结果目录 → markdown）
-python3 scripts/m16_compare.py --before bench-results-m15-baseline --after bench-results-final --scales xs,s,m
-```
-
-> 并发组结论**必须取自完整跑**。单独 `scripts/m15_bench.sh --only conc` 因冷页缓存在本机不可复现（同配置两次可差 10 倍），只能用来定性、不能用来调参。

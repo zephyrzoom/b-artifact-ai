@@ -1,12 +1,12 @@
 name: Build & Package
 
-# 跨平台打包：每个 OS 用各自的 runner 原生构建（Rust+rusqlite 与 Electron 都不适合交叉编译）。
+# 跨平台打包：每个 OS 用各自的 runner 原生构建（Rust+rusqlite 与 Tauri 都不适合交叉编译）。
 #   - 后端：Rust 原生二进制 + 管理端静态站（admin/dist）→ tar.gz / zip
-#   - 前端：Electron 客户端 → linux AppImage+tar.gz / win portable 单文件 / mac zip
+#   - 前端：Tauri 客户端（v0.5.0 起替换 Electron）→ linux tar.gz / win 单 exe / mac zip
 #
 # **runner 标签与产物架构必须显式配对**。macos-latest 已于 2026-06 从 macOS 15 迁到 macOS 26，
 # 底层机器同时从 Intel 换成 Apple Silicon——"macOS ⇒ x64"这个 macos-13 时代的隐含假设已经不成立。
-# 所以架构由矩阵的 `arch` 字段显式传给 electron-builder，而不是靠 runner 标签隐式推导：
+# 所以架构由矩阵的 `arch` 字段 + `tauri_target` 显式给出，而不是靠 runner 标签隐式推导：
 # 平台哪天再迁一次，产物架构不会跟着静默错位。
 on:
   push:
@@ -33,12 +33,12 @@ jobs:
           - os: ubuntu-latest
             target_os: linux
             arch: x64
-            electron_flag: --linux
+            tauri_target: x86_64-unknown-linux-gnu
             ext: ""
           - os: windows-latest
             target_os: windows
             arch: x64
-            electron_flag: --win
+            tauri_target: x86_64-pc-windows-msvc
             ext: ".exe"
           # macos-latest = macOS 26，**Apple Silicon（arm64）**。
           # 原先这里是 macos-13（Intel x64），而该镜像已于 2025-12-04 完全退役、标签已不存在，
@@ -47,7 +47,7 @@ jobs:
           - os: macos-latest
             target_os: macos
             arch: arm64
-            electron_flag: --mac
+            tauri_target: aarch64-apple-darwin
             ext: ""
 
     steps:
@@ -67,7 +67,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
+          workspaces: |
+            server
+            client/src-tauri
 
       # ---------- 管理端（Vue 静态站点，服务端在 /admin/ 下托管）----------
       - name: Build admin (Vue)
@@ -81,36 +83,48 @@ jobs:
         working-directory: server
         run: cargo build --release
 
-      # ---------- 客户端（Electron）----------
+      # ---------- 客户端（Tauri 2 + Rust）----------
       # **每条 npm 命令各占一个 step，不要串在同一个 run: 里。**
       # 踩过的坑：Windows 腿的 run: 里串了 `npm ci` / `npm run build` / `npm run icon`，
-      # 其中 `npm run build` 因build.mjs 用了 POSIX-only 的 `.bin/vite` 而失败，但 pwsh 的
-      # `$ErrorActionPreference='Stop'` 默认不拦原生命令的非零退出，GitHub 也只在脚本**末尾**
-      # 查一次 `$LASTEXITCODE`——于是紧接着的 `npm run icon`（纯 node，正常）把退出码盖成 0，
-      # 步骤绿灯通过，electron-builder 顺手把「只有 main+preload、没有 renderer」的半成品
-      # 打进 exe，直到用户双击才看到「渲染层尚未构建」。拆开之后每步各自查退出码。
+      # 其中 `npm run build` 失败，但 pwsh 的 `$ErrorActionPreference='Stop'` 默认不拦原生命令的
+      # 非零退出，GitHub 也只在脚本**末尾**查一次 `$LASTEXITCODE`——于是紧接着的命令把退出码
+      # 盖成 0，步骤绿灯通过，最后打出一个缺渲染层的包（用户双击才炸）。拆开之后每步各自查退出码。
       - name: Install client deps
         working-directory: client
         run: npm ci
 
-      - name: Build client (main + preload + renderer)
+      - name: Build client renderer
         working-directory: client
         run: npm run build
 
-      - name: Generate client icon
-        working-directory: client
-        run: npm run icon
+      # Linux 上 Tauri 的编译期与运行期都依赖 webkit2gtk（AppImage 不会把它打进去）
+      - name: Install Linux webkit deps
+        if: matrix.target_os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
+            libayatana-appindicator3-dev xvfb
 
       - name: Package client (${{ matrix.target_os }}-${{ matrix.arch }})
         working-directory: client
-        run: npx electron-builder ${{ matrix.electron_flag }} --${{ matrix.arch }} --publish never
+        run: npx tauri build --target ${{ matrix.tauri_target }}
 
-      # 打包门禁：asar 里**必须**含渲染层入口。
-      # 为什么要这道：打包器只按 `files` 收集，不校验应用能不能起得来。缺 index.html 的包
-      # 能顺利通过构建、打包、上传，直到用户双击exe 才暴露（真实踩过）。三平台都跑——
-      # 这正是上一条缺陷能一路绿灯的原因：只有 Windows 腿出问题，却没有任何跨平台断言。
-      - name: Verify asar contains renderer entry
-        run: node scripts/check_asar.mjs
+      # 打包门禁（替代 Electron 时代的 asar 校验 + CDP 冒烟）：
+      # 真把打包产物跑一遍，断言"首屏已挂载 + 一次 IPC 往返成功"。
+      # macOS 没有 WebDriver，所以走应用内 `--self-check` 注入，三平台同一套。
+      - name: Self-check packaged app
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="client/src-tauri/target/${{ matrix.tauri_target }}/release/b-artifact-app"
+          if [ -f "$BIN.exe" ]; then BIN="$BIN.exe"; fi
+          if [ ! -f "$BIN" ]; then echo "缺少打包产物：$BIN"; exit 1; fi
+          export B_ARTIFACT_HOME="$(mktemp -d)"
+          if [ "${{ matrix.target_os }}" = "linux" ]; then
+            xvfb-run -a "$BIN" --self-check
+          else
+            "$BIN" --self-check
+          fi
 
       # ---------- 组装后端交付物：二进制 + admin/dist + 样例配置 ----------
       - name: Assemble backend bundle
@@ -212,14 +226,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p upload/client
-          # 只搬 release 顶层的分发文件本身；不要 electron-builder 顺手生成的
-          # *.blockmap（差量更新索引）、builder-debug.yml 和 *-unpacked/ 解包目录（-type f 只取文件）。
-          # Windows(portable) 搬完恰好就是一个 exe；linux 为 AppImage+tar.gz；mac 为 zip。
-          find client/release -maxdepth 1 -type f \
-            ! -name '*.blockmap' \
-            ! -name 'builder-debug.yml' \
-            ! -name 'builder-effective-config.yaml' \
-            -exec cp {} upload/client/ \;
+          OS="${{ matrix.target_os }}"
+          ARCH="${{ matrix.arch }}"
+          REL="client/src-tauri/target/${{ matrix.tauri_target }}/release"
+          case "$OS" in
+            macos)
+              # ditto 保住 .app 的符号链接与权限；zip -r 会把 bundle 结构压坏
+              ditto -c -k --sequesterRsrc --keepParent "$REL/bundle/macos/b-artifact.app" \
+                "upload/client/b-artifact-$OS-$ARCH.zip"
+              ;;
+            windows)
+              # 用户只要**单个 exe**（2026-09-24 定）：裸二进制即绿色版，前端资源已内嵌
+              cp "$REL/b-artifact-app.exe" "upload/client/b-artifact-$OS-$ARCH.exe"
+              ;;
+            linux)
+              tar -czf "upload/client/b-artifact-$OS-$ARCH.tar.gz" -C "$REL" b-artifact-app
+              ;;
+          esac
           echo "=== upload/ 内容 ==="
           ls -R upload
 

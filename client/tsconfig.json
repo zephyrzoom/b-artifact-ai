@@ -14,7 +14,8 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+  // 引擎与 CLI 已迁到 Rust（client/src-tauri）；这里只检查跨边界的 shared 与渲染层以外的 TS
+  "include": ["src/shared/**/*.ts"],
   // 渲染层要 DOM lib 与 .vue 支持，单独用 tsconfig.renderer.json 检查
-  "exclude": ["src/renderer", "tests/renderer", "dist"]
+  "exclude": ["src/renderer", "tests/renderer", "dist", "src-tauri"]
 }

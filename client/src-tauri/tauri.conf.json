@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "b-artifact",
+  "mainBinaryName": "b-artifact-app",
+  "version": "0.5.0",
+  "identifier": "com.bartifact.client",
+  "build": {
+    "frontendDist": "../dist/renderer",
+    "devUrl": "http://127.0.0.1:5273"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "b-artifact",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "visible": false,
+        "backgroundColor": "#F5F7FA"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:5273 ws://127.0.0.1:5273; frame-src 'none'; object-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "b-artifact 客户端",
+    "longDescription": "面向二进制资产的类 SVN 集中式版本管理客户端：工作副本 / 部分检出 / 锁 / 冲突解决",
+    "copyright": "b-artifact",
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

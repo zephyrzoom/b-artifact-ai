@@ -8,6 +8,7 @@
 
 import type { ConflictResolution } from '@shared/dto';
 
+import { createTauriBridge } from './tauri-bridge';
 import type { BridgeCallMap, BridgeEventMap, BartifactBridge } from './env';
 
 export class IpcError extends Error {
@@ -22,19 +23,41 @@ export class IpcError extends Error {
 }
 
 /**
- * 取桥接对象。正常运行时由 preload 注入；
- * 拿不到说明 preload 没加载（构建/路径出错），此时必须**明确报错**而不是静默降级。
+ * 是否跑在 Tauri 的 WebView 里。
+ *
+ * `__TAURI_INTERNALS__` 由 Tauri 注入到 window；happy-dom 单测里不存在，
+ * 于是"没有桥"的原有用例仍然成立。
+ */
+function inTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+let tauriBridge: BartifactBridge | null = null;
+
+/**
+ * 取桥接对象。
+ *
+ * 两种来源，形状完全一致：
+ *   1. `window.bartifact` —— Electron 时代的 preload 注入（单测替身也走这条路）；
+ *   2. Tauri 桥（`invoke('ipc', {channel, payload})` + `listen`）。
+ *
+ * 两者都没有时**明确报错**而不是静默降级成空操作。
  */
 export function bridge(): BartifactBridge {
-  const b = window.bartifact;
-  if (!b) {
-    throw new IpcError('NO_BRIDGE', 'preload 未注入（window.bartifact 不存在）');
+  const fromPreload = window.bartifact;
+  if (fromPreload) return fromPreload;
+  if (inTauri()) {
+    tauriBridge ??= createTauriBridge();
+    return tauriBridge;
   }
-  return b;
+  throw new IpcError(
+    'NO_BRIDGE',
+    'preload/bridge 未注入（window.bartifact 不存在，且不在 Tauri 环境里）',
+  );
 }
 
 export function hasBridge(): boolean {
-  return !!window.bartifact;
+  return !!window.bartifact || inTauri();
 }
 
 /**

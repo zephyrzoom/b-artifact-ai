@@ -73,7 +73,7 @@
         首次登录：服务端 users 表为空时，第一个成功登录的用户自动成为系统管理员（方案 §9.1）。
       </p>
       <p v-if="store.info" class="muted hint mono" data-testid="login-appinfo">
-        Electron {{ store.info.electron }} · Node {{ store.info.node }} · {{ store.info.platform }}
+        {{ store.info.electron }}{{ store.info.node ? ' · ' + store.info.node : '' }} · {{ store.info.platform }}
       </p>
     </el-card>
   </div>

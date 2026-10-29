@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "只给 core:default —— 文件系统、网络、对话框、外链全部走 Rust 侧命令，前端不持有任何插件权限",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

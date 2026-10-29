@@ -1,0 +1,71 @@
+[package]
+name = "b-artifact-client"
+version = "0.5.0"
+edition = "2021"
+description = "b-artifact 客户端（工作副本 / 部分检出 / 锁 / 冲突解决）"
+license = "MIT"
+default-run = "b-artifact-app"
+
+[lib]
+name = "b_artifact_client"
+path = "src/lib.rs"
+
+# 桌面壳（Tauri）。前端产物由 vite 打进 dist/renderer，编译期内嵌进二进制。
+[[bin]]
+name = "b-artifact-app"
+path = "src/main.rs"
+
+# CLI：与桌面壳共用同一个引擎，**不依赖 tauri**，可在无 GUI 的环境（CI / 服务器）跑。
+[[bin]]
+name = "b-artifact"
+path = "src/cli.rs"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+unicode-normalization = "0.1"
+walkdir = "2"
+notify = "8.1"
+libc = "0.2"
+dirs = "6"
+futures-util = "0.3"
+regex = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "io-util", "sync"] }
+
+# 钥匙串：平台后端各不相同，按目标平台分别开（默认不开 = 任何后端都没有）
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# 发行二进制的体积：与 server 同样开 LTO，另加 strip（不剥的话 debug 符号能占十几 MB）
+[profile.release]
+lto = true
+strip = true
+panic = "abort"
+codegen-units = 1
+
+# 开发期也把**依赖**编成优化态：否则 wry/reqwest 的 debug 构建慢到无法迭代
+[profile.dev.package."*"]
+opt-level = 2

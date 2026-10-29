@@ -41,3 +41,6 @@ bench-results-m17/
 
 # 便于离线转移的仓库包
 *.bundle
+
+# Tauri 生成物（tauri-build 产出，别进仓库）
+client/src-tauri/gen/

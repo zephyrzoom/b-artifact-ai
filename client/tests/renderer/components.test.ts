@@ -799,9 +799,12 @@ describe('LoginView', () => {
     expect(store.login).toHaveBeenCalledWith('http://127.0.0.1:9000', 'bob', 'pw');
   });
 
-  it('展示应用与运行时版本（便于用户报障时一眼看到版本）', () => {
+  it('展示运行时与平台信息（便于用户报障时一眼看到版本）', () => {
     const w = mount(LoginView, { global: { stubs: commonStubs } });
-    expect(w.find('[data-testid="login-appinfo"]').text()).toContain('Electron 44.3.0');
+    // 迁移到 Tauri 后不再有 "Electron/Node" 字样：模板只渲染运行时字段里给的值
+    const text = w.find('[data-testid="login-appinfo"]').text();
+    expect(text).toContain('44.3.0');
+    expect(text).toContain('darwin');
   });
 
   it('登录失败时把错误显示出来', async () => {
