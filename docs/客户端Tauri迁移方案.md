@@ -466,3 +466,10 @@ Windows "单文件"要求（2026-09-24 定：不要 nsis/zip/blockmap）**继续
   不再终止判定；
 - 退出码收敛为 0/2/5，失败时打印注入失败次数与最后一次错误，便于不用日志也能判断；
 - CI 的该步骤加 `timeout-minutes: 5`，防"WebView 起不来但进程不退出"把 job 拖到 6 小时。
+
+**第二轮（更根本的一处）**：老日志仍是 `找不到 main 窗口`，说明 Linux 上窗口在 1.8s 时
+**根本还不存在**。根因是**自检的触发点错了**——原来在 `app.run()` **之前** spawn，而 Linux
+的窗口是事件循环里由 GTK 建出来的，早于 `RunEvent::Ready` 探测必然是 0 个窗口，等待时间
+再长也只是碰运气。改为在 **`RunEvent::Ready`** 回调里触发；窗口发现再加一条退化路径
+（先 `label=main`，再取"任意一个 webview"），彻底找不到时打印 webview 数量与
+`DISPLAY`/`WAYLAND_DISPLAY`。CI 步骤另外失败重试一次（共享 runner 上 GUI 冷启动抖动常见）。
