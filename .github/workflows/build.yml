@@ -133,13 +133,23 @@ jobs:
           if [ -f "$BIN.exe" ]; then BIN="$BIN.exe"; fi
           if [ ! -f "$BIN" ]; then echo "缺少打包产物：$BIN"; exit 1; fi
           export B_ARTIFACT_HOME="$(mktemp -d)"
-          if [ "${{ matrix.target_os }}" = "linux" ]; then
-            # xvfb 里没有 GPU 合成器：不关掉 WebKitGTK 的 DMABUF 渲染会直接白屏
-            WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 \
-              xvfb-run -a "$BIN" --self-check
-          else
-            "$BIN" --self-check
-          fi
+
+          run_check() {
+            if [ "${{ matrix.target_os }}" = "linux" ]; then
+              # xvfb 里没有 GPU 合成器：不关掉 WebKitGTK 的 DMABUF 渲染会直接白屏
+              WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 \
+                xvfb-run -a "$BIN" --self-check
+            else
+              "$BIN" --self-check
+            fi
+          }
+
+          # 共享 runner 上 GUI 冒烟偶发超时很常见（首个 1 MB 的前端冷启动）。
+          # 失败重试一次：仍然是真门禁，但不会因为一次抖动把整条腿判死。
+          if run_check; then exit 0; fi
+          echo "第 1 次自检失败，3s 后重试…"
+          sleep 3
+          run_check
 
       # ---------- 组装后端交付物：二进制 + admin/dist + 样例配置 ----------
       - name: Assemble backend bundle
